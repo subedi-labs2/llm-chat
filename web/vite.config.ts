@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
-    resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+    resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
     server: {
       proxy: {
         "/api": {

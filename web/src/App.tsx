@@ -57,12 +57,13 @@ function App() {
           <p className="mb-3 text-sm font-semibold tracking-wide text-teal-700 uppercase">
             Product and vehicle safety
           </p>
-          <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
             Make informed safety decisions.
           </h1>
-          <p className="mx-auto mt-5 max-w-xl text-pretty text-base leading-7 text-slate-600 sm:text-lg">
-            Research recalls, understand potential risks, and learn what steps to take next. Safety
-            information and guided research are coming soon.
+          <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-pretty text-slate-600 sm:text-lg">
+            Research recalls, understand potential risks, and learn what steps
+            to take next. Safety information and guided research are coming
+            soon.
           </p>
         </section>
 
@@ -78,7 +79,9 @@ function App() {
             className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
           />
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-            <span className="px-2 text-xs text-slate-400">Research chat coming soon</span>
+            <span className="px-2 text-xs text-slate-400">
+              Research chat coming soon
+            </span>
             <Button size="icon" disabled aria-label="Send question">
               <ArrowUp className="size-4" aria-hidden="true" />
             </Button>
@@ -86,7 +89,8 @@ function App() {
         </section>
 
         <p className="mt-6 text-center text-xs leading-5 text-slate-400">
-          Always confirm critical recall information with the manufacturer or responsible agency.
+          Always confirm critical recall information with the manufacturer or
+          responsible agency.
         </p>
       </main>
     </div>
