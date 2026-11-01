@@ -79,7 +79,7 @@ function App() {
             className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
           />
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-            <span className="px-2 text-xs text-slate-400">
+            <span className="px-2 text-xs text-slate-600">
               Research chat coming soon
             </span>
             <Button size="icon" disabled aria-label="Send question">
