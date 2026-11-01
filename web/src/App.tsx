@@ -1,25 +1,10 @@
 import { CheckCircle2, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { Chat } from "@/components/chat";
-import { getHealth } from "@/lib/api";
-
-type ApiStatus = "checking" | "connected" | "unavailable";
+import { useApiStatus } from "@/hooks/use-api-status";
 
 function App() {
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getHealth(controller.signal)
-      .then(() => setApiStatus("connected"))
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setApiStatus("unavailable");
-        }
-      });
-    return () => controller.abort();
-  }, []);
+  const apiStatus = useApiStatus();
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-950">
