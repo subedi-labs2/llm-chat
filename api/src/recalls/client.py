@@ -50,9 +50,14 @@ class RecallClient:
         url = f"{self._settings.vpic_api_url}/vehicles/DecodeVinValues/{vin}"
         data = await self._get_json(url, {"format": "json"}, {200})
         results = data.get("Results") if isinstance(data, dict) else None
-        if not results:
+
+        if not isinstance(results, list) or not results:
             raise RecallSourceError("VIN decoder returned no results")
+        
         row = results[0]
+        if not isinstance(row, dict):
+            raise RecallSourceError("VIN decoder returned an invalid result")
+        
         year = _text(row.get("ModelYear"))
         error_code = _text(row.get("ErrorCode"))
         return DecodedVehicle(
