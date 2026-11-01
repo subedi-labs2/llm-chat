@@ -4,8 +4,8 @@ import { getHealth } from "@/lib/api";
 
 export type ApiStatus = "checking" | "connected" | "unavailable";
 
-const POLL_INTERVAL_MS = 5_000;
-const REQUEST_TIMEOUT_MS = 3_000;
+const POLL_INTERVAL_MS = 3_000;
+const REQUEST_TIMEOUT_MS = 2_000;
 
 export function useApiStatus(): ApiStatus {
   const [status, setStatus] = useState<ApiStatus>("checking");
