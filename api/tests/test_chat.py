@@ -25,7 +25,7 @@ from src.chat.router import get_chat_model, get_recall_client
 from src.core.config import Settings, get_settings
 from src.main import app
 from src.recalls.client import RecallClient
-from tests.test_recall_client import NHTSA_RECALL
+from tests.test_recall_client import NHTSA_RECALL, cpsc_recall
 
 
 def post_chat(payload: dict[str, Any]) -> Response:
@@ -47,7 +47,7 @@ def clear_overrides() -> Iterator[None]:
     app.dependency_overrides.clear()
 
 
-def use_nhtsa(handler: Any) -> None:
+def use_recall_api(handler: Any) -> None:
     def client() -> RecallClient:
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return RecallClient(http, Settings())
@@ -67,7 +67,7 @@ def tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
 @pytest.mark.parametrize("api_key", [None, SecretStr("")])
 def test_chat_returns_503_when_gemini_key_missing(api_key: SecretStr | None) -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(gemini_api_key=api_key)
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
@@ -112,7 +112,7 @@ def test_chat_falls_back_when_primary_model_is_overloaded() -> None:
     app.dependency_overrides[get_chat_model] = lambda: FallbackModel(
         FunctionModel(overloaded), FunctionModel(backup)
     )
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
@@ -124,7 +124,7 @@ def test_chat_returns_502_when_all_models_fail() -> None:
     app.dependency_overrides[get_chat_model] = lambda: FallbackModel(
         FunctionModel(overloaded), FunctionModel(overloaded)
     )
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
@@ -137,7 +137,7 @@ def test_chat_returns_502_when_all_models_fail() -> None:
 )
 def test_chat_rejects_invalid_conversations(messages: list[dict[str, str]]) -> None:
     app.dependency_overrides[get_chat_model] = lambda: FunctionModel(lambda *_: ModelResponse([]))
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
 
     assert post_chat({"messages": messages}).status_code == 422
 
@@ -159,7 +159,7 @@ def test_chat_answers_from_tool_results_with_retrieved_sources() -> None:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
 
     app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
 
     response = post_chat(
         {
@@ -203,7 +203,7 @@ def test_chat_reports_unavailable_source_to_model() -> None:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
 
     app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
-    use_nhtsa(lambda _: httpx.Response(503, text="down"))
+    use_recall_api(lambda _: httpx.Response(503, text="down"))
 
     response = post_chat({"messages": [user("Recalls for 2018 Honda Accord?")]})
 
@@ -233,7 +233,7 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
 
     app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
-    use_nhtsa(lambda request: calls.append(request) or httpx.Response(200, json={}))
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json={}))
 
     response = post_chat({"messages": [user("My VIN is OOPS")]})
 
@@ -288,7 +288,7 @@ def test_chat_makes_model_correct_unretrieved_recalls(unsupported: dict[str, Any
     app.dependency_overrides[get_chat_model] = lambda: accord_recall_model(
         [unsupported, corrected], feedback
     )
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
@@ -307,7 +307,7 @@ def test_chat_never_publishes_persistently_unsupported_recalls() -> None:
         "cited_recall_ids": ["99V999000"],
     }
     app.dependency_overrides[get_chat_model] = lambda: accord_recall_model([unsupported], feedback)
-    use_nhtsa(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
@@ -326,3 +326,123 @@ def test_chat_never_publishes_persistently_unsupported_recalls() -> None:
 )
 def test_mentioned_campaign_numbers(text: str, expected: list[str]) -> None:
     assert mentioned_campaign_numbers(text) == expected
+
+
+def tool_feedback(messages: list[ModelMessage], tool_name: str) -> list[str]:
+    # ModelRetry may surface as a RetryPromptPart or ToolReturnPart depending on the
+    # pydantic-ai version.
+    return [
+        str(part.content)
+        for message in messages
+        for part in message.parts
+        if isinstance(part, RetryPromptPart | ToolReturnPart) and part.tool_name == tool_name
+    ]
+
+
+def stroller_search_model(
+    answers: list[dict[str, Any]], seen_results: list[dict[str, Any]], feedback: list[str]
+) -> FunctionModel:
+    """Search the CPSC for Acme strollers once, then return each answer in turn."""
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        returns = tool_returns(messages)
+        if not returns:
+            args = {"product_name": "stroller", "manufacturer": "Acme"}
+            return ModelResponse(parts=[ToolCallPart("search_product_recalls", args)])
+        seen_results[:] = [returns[0].model_response_object()]
+        feedback[:] = retry_feedback(messages)
+        output = answers[min(len(feedback), len(answers) - 1)]
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
+
+    return FunctionModel(model)
+
+
+def test_chat_answers_from_cpsc_search_with_verified_sources() -> None:
+    requests: list[httpx.Request] = []
+    seen_results: list[dict[str, Any]] = []
+    feedback: list[str] = []
+    no_url = cpsc_recall("25002", "2025-02-01") | {"URL": None}
+
+    def cpsc(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[cpsc_recall("25001", "2025-03-01"), no_url])
+
+    # Recall 25002 has no CPSC URL, so it is never registered as a source and can't be cited.
+    answers = [
+        {
+            "answer": "Recalls 25001 and 25002 cover Acme strollers.",
+            "cited_recall_ids": ["25001", "25002"],
+        },
+        {
+            "answer": "Recall 25001: the frame can break. Get a refund.",
+            "cited_recall_ids": ["25001"],
+        },
+    ]
+    app.dependency_overrides[get_chat_model] = lambda: stroller_search_model(
+        answers, seen_results, feedback
+    )
+    use_recall_api(cpsc)
+
+    response = post_chat({"messages": [user("Any recalls on Acme strollers?")]})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "Recall 25001: the frame can break. Get a refund.",
+        "sources": [
+            {
+                "id": "25001",
+                "agency": "CPSC",
+                "title": "Stroller recall 25001",
+                "url": "https://www.cpsc.gov/Recalls/25001",
+            }
+        ],
+    }
+    assert [request.url.path for request in requests] == ["/RestWebServices/Recall"]
+    assert requests[0].url.params["ProductName"] == "stroller"
+    assert requests[0].url.params["Manufacturer"] == "Acme"
+    assert seen_results[0]["total_found"] == 2
+    assert len(feedback) == 1
+    assert "25002" in feedback[0]
+
+
+def test_chat_reports_unavailable_cpsc_source_to_model() -> None:
+    seen_results: list[dict[str, Any]] = []
+    answer = {"answer": "I couldn't reach the CPSC right now.", "cited_recall_ids": []}
+    app.dependency_overrides[get_chat_model] = lambda: stroller_search_model(
+        [answer], seen_results, []
+    )
+    use_recall_api(lambda _: httpx.Response(503, text="down"))
+
+    response = post_chat({"messages": [user("Any recalls on Acme strollers?")]})
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": "I couldn't reach the CPSC right now.", "sources": []}
+    assert seen_results[0]["agency"] == "CPSC"
+    assert "503" in seen_results[0]["error"]
+
+
+def test_chat_requires_cpsc_search_terms_before_calling_cpsc() -> None:
+    calls: list[httpx.Request] = []
+    feedback: list[str] = []
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        parts = [part for message in messages for part in message.parts]
+        retried = any(
+            isinstance(part, ToolCallPart) and part.tool_name == "search_product_recalls"
+            for part in parts
+        )
+        feedback.extend(tool_feedback(messages, "search_product_recalls"))
+        if not retried:
+            args = {"recall_date_start": "2025-01-01"}
+            return ModelResponse(parts=[ToolCallPart("search_product_recalls", args)])
+        output = {"answer": "Which product or brand should I check?", "cited_recall_ids": []}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
+
+    app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json=[]))
+
+    response = post_chat({"messages": [user("Any product recalls this year?")]})
+
+    assert response.status_code == 200
+    assert calls == []
+    assert any("product_name, manufacturer, or recall_number" in text for text in feedback)
