@@ -53,11 +53,11 @@ class RecallClient:
 
         if not isinstance(results, list) or not results:
             raise RecallSourceError("VIN decoder returned no results")
-        
+
         row = results[0]
         if not isinstance(row, dict):
             raise RecallSourceError("VIN decoder returned an invalid result")
-        
+
         year = _text(row.get("ModelYear"))
         error_code = _text(row.get("ErrorCode"))
         return DecodedVehicle(
