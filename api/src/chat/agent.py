@@ -55,7 +55,7 @@ Answer format:
 
 
 class ChatAnswer(BaseModel):
-    answer: str = Field(description="The reply shown to the user.")
+    answer: str = Field(min_length=1, max_length=4000, description="The reply shown to the user.")
     cited_recall_ids: list[str] = Field(
         default_factory=list,
         description="NHTSA campaign numbers or CPSC recall numbers mentioned in the answer.",
