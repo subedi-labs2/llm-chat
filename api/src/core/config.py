@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     app_name: str = "Consumer Product & Vehicle Safety API"
     app_env: Literal["development", "test", "production"] = "development"
 
-    openai_api_key: SecretStr | None = None
-    openai_model: str = "gpt-5.4-mini"
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3.8-flash"
 
     nhtsa_api_url: str = "https://api.nhtsa.gov"
     vpic_api_url: str = "https://vpic.nhtsa.dot.gov/api"

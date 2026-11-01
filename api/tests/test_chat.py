@@ -16,6 +16,7 @@ from pydantic_ai import (
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.google import GoogleModel
 
 from src.chat.router import get_chat_model, get_recall_client
 from src.core.config import Settings, get_settings
@@ -61,8 +62,8 @@ def tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
 
 
 @pytest.mark.parametrize("api_key", [None, SecretStr("")])
-def test_chat_returns_503_when_openai_key_missing(api_key: SecretStr | None) -> None:
-    app.dependency_overrides[get_settings] = lambda: Settings(openai_api_key=api_key)
+def test_chat_returns_503_when_gemini_key_missing(api_key: SecretStr | None) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(gemini_api_key=api_key)
     use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
 
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
@@ -70,10 +71,13 @@ def test_chat_returns_503_when_openai_key_missing(api_key: SecretStr | None) -> 
     assert response.status_code == 503
 
 
-def test_chat_builds_openai_model_from_settings() -> None:
-    model = get_chat_model(Settings(openai_api_key=SecretStr("sk-test"), openai_model="gpt-x"))
+def test_chat_builds_gemini_model_from_settings() -> None:
+    model = get_chat_model(
+        Settings(gemini_api_key=SecretStr("test-key"), gemini_model="gemini-x-flash")
+    )
 
-    assert model.model_name == "gpt-x"
+    assert isinstance(model, GoogleModel)
+    assert model.model_name == "gemini-x-flash"
 
 
 @pytest.mark.parametrize(

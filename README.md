@@ -1,6 +1,6 @@
 # Consumer Product & Vehicle Safety Assistant
 
-A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with an OpenAI model (via [Pydantic AI](https://ai.pydantic.dev/)) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
+A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with a Google Gemini model (via [Pydantic AI](https://ai.pydantic.dev/)) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
 
 ## How answers stay grounded
 
@@ -38,7 +38,7 @@ cd api && uv run uvicorn src.main:app --reload
 cd web && npm run dev
 ```
 
-Set `OPENAI_API_KEY` in `api/.env` (copy `api/.env.example`) to enable chat; without it `/api/chat` returns 503. Open <http://localhost:5173>. Vite proxies `/api` requests to the API at `http://localhost:8000` by default. Copy `api/.env.example` to `api/.env` or `web/.env.example` to `web/.env` only when overriding their defaults.
+Set `GEMINI_API_KEY` in `api/.env` (copy `api/.env.example`) to enable chat. You can create a free key in [Google AI Studio](https://aistudio.google.com/apikey); without it `/api/chat` returns 503. Open <http://localhost:5173>. Vite proxies `/api` requests to the API at `http://localhost:8000` by default. Copy `api/.env.example` to `api/.env` or `web/.env.example` to `web/.env` only when overriding their defaults.
 
 ## Quality checks
 

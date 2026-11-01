@@ -14,8 +14,8 @@ from pydantic_ai import (
     UserPromptPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.providers.google import GoogleProvider
 
 from src.chat.agent import ChatDeps, recall_agent
 from src.chat.schemas import ChatMessage, ChatRequest, ChatResponse
@@ -30,11 +30,11 @@ USAGE_LIMITS = UsageLimits(request_limit=8, tool_calls_limit=6)
 
 
 def get_chat_model(settings: Annotated[Settings, Depends(get_settings)]) -> Model:
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""
+    api_key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else ""
     if not api_key:
         raise HTTPException(status_code=503, detail="Chat is not configured")
-    provider = OpenAIProvider(api_key=api_key)
-    return OpenAIChatModel(settings.openai_model, provider=provider)
+    provider = GoogleProvider(api_key=api_key)
+    return GoogleModel(settings.gemini_model, provider=provider)
 
 
 def get_recall_client(
