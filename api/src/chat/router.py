@@ -81,7 +81,6 @@ async def chat(
         logger.exception("Chat run failed")
         raise HTTPException(status_code=502, detail="The assistant could not answer") from exc
 
-    # Only cite recalls that were actually retrieved during this run.
-    cited = dict.fromkeys(result.output.cited_recall_ids)
-    sources = [deps.sources[recall_id] for recall_id in cited if recall_id in deps.sources]
+    # The output validator guarantees every cited recall was retrieved during this run.
+    sources = [deps.sources[recall_id] for recall_id in result.output.cited_recall_ids]
     return ChatResponse(answer=result.output.answer, sources=sources)

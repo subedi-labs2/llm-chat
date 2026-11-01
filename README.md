@@ -7,7 +7,7 @@ A public-facing assistant that helps people research product and vehicle safety.
 - The model is instructed to state recall facts only from tool results, never from memory, and to ask for missing details (make, model, year, or VIN) instead of guessing.
 - Tools: `decode_vin` (NHTSA vPIC), `search_vehicle_recalls` (NHTSA recalls by make/model/year), and `search_product_recalls` (CPSC, newest first, capped at `MAX_PRODUCT_RECALL_RESULTS`).
 - If a source is unreachable, the tool tells the model so it can say it couldn't check instead of inventing an answer.
-- Response `sources` only include recalls the model cited **and** that were actually retrieved during the request, so citations can't be hallucinated.
+- Answers may only cite or mention recalls retrieved by a tool during the request. An output check also scans the answer text for NHTSA campaign numbers. If anything else appears, the model is told which IDs are unsupported and must correct the answer; if it can't, the API returns 502 instead of publishing unsupported claims.
 
 ## Structure
 

@@ -20,6 +20,7 @@ from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.google import GoogleModel
 
+from src.chat.agent import mentioned_campaign_numbers
 from src.chat.router import get_chat_model, get_recall_client
 from src.core.config import Settings, get_settings
 from src.main import app
@@ -141,7 +142,7 @@ def test_chat_rejects_invalid_conversations(messages: list[dict[str, str]]) -> N
     assert post_chat({"messages": messages}).status_code == 422
 
 
-def test_chat_answers_from_tool_results_and_only_cites_retrieved_recalls() -> None:
+def test_chat_answers_from_tool_results_with_retrieved_sources() -> None:
     seen_history: list[list[ModelMessage]] = []
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -153,7 +154,7 @@ def test_chat_answers_from_tool_results_and_only_cites_retrieved_recalls() -> No
         assert returns[0].model_response_object()["total_found"] == 1
         output = {
             "answer": "Recall 18V268000: park outside. The wiring may short.",
-            "cited_recall_ids": ["18V268000", "99V999000"],
+            "cited_recall_ids": ["18V268000"],
         }
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
 
@@ -239,3 +240,89 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
     assert response.status_code == 200
     assert calls == []
     assert any("17 letters" in text for text in feedback)
+
+
+def retry_feedback(messages: list[ModelMessage]) -> list[str]:
+    # Output validation feedback may arrive as a RetryPromptPart or as a ToolReturnPart for
+    # the output tool, depending on the pydantic-ai version.
+    return [
+        str(part.content)
+        for message in messages
+        for part in message.parts
+        if isinstance(part, RetryPromptPart)
+        or (isinstance(part, ToolReturnPart) and part.tool_name == "final_result")
+    ]
+
+
+def accord_recall_model(answers: list[dict[str, Any]], feedback: list[str]) -> FunctionModel:
+    """Search NHTSA once, then return each answer in turn as the model's output."""
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if not tool_returns(messages):
+            args = {"make": "Honda", "model": "Accord", "model_year": 2018}
+            return ModelResponse(parts=[ToolCallPart("search_vehicle_recalls", args)])
+        feedback[:] = retry_feedback(messages)
+        output = answers[min(len(feedback), len(answers) - 1)]
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
+
+    return FunctionModel(model)
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        {
+            "answer": "Recall 18V268000 and 99V999000 both affect this car.",
+            "cited_recall_ids": ["18V268000", "99V999000"],
+        },
+        {
+            "answer": "Recall 18V268000 applies. Recall 99V-999 also covers the airbags.",
+            "cited_recall_ids": ["18V268000"],
+        },
+    ],
+    ids=["cited", "mentioned-only"],
+)
+def test_chat_makes_model_correct_unretrieved_recalls(unsupported: dict[str, Any]) -> None:
+    feedback: list[str] = []
+    corrected = {"answer": "Recall 18V268000 applies.", "cited_recall_ids": ["18V268000"]}
+    app.dependency_overrides[get_chat_model] = lambda: accord_recall_model(
+        [unsupported, corrected], feedback
+    )
+    use_nhtsa(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Recall 18V268000 applies."
+    assert [source["id"] for source in body["sources"]] == ["18V268000"]
+    assert len(feedback) == 1
+    assert "99V999000" in feedback[0]
+
+
+def test_chat_never_publishes_persistently_unsupported_recalls() -> None:
+    feedback: list[str] = []
+    unsupported = {
+        "answer": "Recall 99V999000 means you should stop driving.",
+        "cited_recall_ids": ["99V999000"],
+    }
+    app.dependency_overrides[get_chat_model] = lambda: accord_recall_model([unsupported], feedback)
+    use_nhtsa(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 502
+    assert "99V999000" not in response.text
+    assert feedback
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("See 18V268000 and 20v-123.", ["18V268000", "20V123000"]),
+        ("Campaign 24E012345 (equipment).", ["24E012345"]),
+        ("Call 1-888-327-4236 or visit nhtsa.gov in 2018.", []),
+    ],
+)
+def test_mentioned_campaign_numbers(text: str, expected: list[str]) -> None:
+    assert mentioned_campaign_numbers(text) == expected

@@ -18,6 +18,8 @@ from src.recalls.schemas import (
 pydantic_ai.BANNER_ENABLED = False
 
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+# NHTSA campaign numbers, written either as 18V268000 or in the short form 18V-268.
+NHTSA_CAMPAIGN_PATTERN = re.compile(r"\b(\d{2}[VETC])-?(\d{3})(\d{3})?\b", re.IGNORECASE)
 
 INSTRUCTIONS = """\
 You are a consumer product and vehicle safety assistant. You help people find official recall
@@ -74,6 +76,28 @@ recall_agent = Agent(
     instructions=lambda _: INSTRUCTIONS.format(today=date.today().isoformat()),
     retries=2,
 )
+
+
+def mentioned_campaign_numbers(text: str) -> list[str]:
+    return [
+        f"{prefix.upper()}{first}{rest or '000'}"
+        for prefix, first, rest in NHTSA_CAMPAIGN_PATTERN.findall(text)
+    ]
+
+
+@recall_agent.output_validator
+def require_retrieved_recalls(ctx: RunContext[ChatDeps], output: ChatAnswer) -> ChatAnswer:
+    """Reject answers that cite or mention recalls not retrieved by a tool in this request."""
+    cited = [recall_id.strip() for recall_id in output.cited_recall_ids]
+    referenced = dict.fromkeys([*cited, *mentioned_campaign_numbers(output.answer)])
+    unsupported = [recall_id for recall_id in referenced if recall_id not in ctx.deps.sources]
+    if unsupported:
+        raise ModelRetry(
+            f"These recalls were not returned by a tool during this request: "
+            f"{', '.join(unsupported)}. Search again to retrieve them, or remove them and any "
+            "claims about them from the answer."
+        )
+    return output.model_copy(update={"cited_recall_ids": list(dict.fromkeys(cited))})
 
 
 @recall_agent.tool
