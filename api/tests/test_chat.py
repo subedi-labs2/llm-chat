@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient, Response
 from pydantic import SecretStr
 from pydantic_ai import (
+    ModelHTTPError,
     ModelMessage,
     ModelResponse,
     RetryPromptPart,
@@ -15,6 +16,7 @@ from pydantic_ai import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.google import GoogleModel
 
@@ -73,11 +75,59 @@ def test_chat_returns_503_when_gemini_key_missing(api_key: SecretStr | None) -> 
 
 def test_chat_builds_gemini_model_from_settings() -> None:
     model = get_chat_model(
-        Settings(gemini_api_key=SecretStr("test-key"), gemini_model="gemini-x-flash")
+        Settings(
+            gemini_api_key=SecretStr("test-key"),
+            gemini_model="gemini-x-flash",
+            gemini_fallback_models=[],
+        )
     )
 
     assert isinstance(model, GoogleModel)
     assert model.model_name == "gemini-x-flash"
+
+
+def test_chat_builds_fallback_chain_without_duplicates() -> None:
+    model = get_chat_model(
+        Settings(
+            gemini_api_key=SecretStr("test-key"),
+            gemini_model="gemini-a",
+            gemini_fallback_models=["gemini-b", "gemini-a", "gemini-c"],
+        )
+    )
+
+    assert isinstance(model, FallbackModel)
+    assert [m.model_name for m in model.models] == ["gemini-a", "gemini-b", "gemini-c"]
+
+
+def overloaded(*_: Any) -> ModelResponse:
+    raise ModelHTTPError(503, "gemini-a", {"error": {"status": "UNAVAILABLE"}})
+
+
+def test_chat_falls_back_when_primary_model_is_overloaded() -> None:
+    def backup(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        output = {"answer": "Answered by the backup model.", "cited_recall_ids": []}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
+
+    app.dependency_overrides[get_chat_model] = lambda: FallbackModel(
+        FunctionModel(overloaded), FunctionModel(backup)
+    )
+    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Answered by the backup model."
+
+
+def test_chat_returns_502_when_all_models_fail() -> None:
+    app.dependency_overrides[get_chat_model] = lambda: FallbackModel(
+        FunctionModel(overloaded), FunctionModel(overloaded)
+    )
+    use_nhtsa(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 502
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,10 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from google.genai.types import HttpRetryOptions
 from pydantic_ai import (
     AgentRunError,
+    FallbackExceptionGroup,
     ModelAPIError,
     ModelMessage,
     ModelRequest,
@@ -14,6 +16,7 @@ from pydantic_ai import (
     UserPromptPart,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
@@ -33,8 +36,13 @@ def get_chat_model(settings: Annotated[Settings, Depends(get_settings)]) -> Mode
     api_key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else ""
     if not api_key:
         raise HTTPException(status_code=503, detail="Chat is not configured")
-    provider = GoogleProvider(api_key=api_key)
-    return GoogleModel(settings.gemini_model, provider=provider)
+    retry = HttpRetryOptions(
+        attempts=max(settings.gemini_retry_attempts, 1), initial_delay=1.0, max_delay=4.0
+    )
+    provider = GoogleProvider(api_key=api_key, retry_options=retry)
+    names = dict.fromkeys([settings.gemini_model, *settings.gemini_fallback_models])
+    models = [GoogleModel(name, provider=provider) for name in names]
+    return models[0] if len(models) == 1 else FallbackModel(*models)
 
 
 def get_recall_client(
@@ -69,7 +77,7 @@ async def chat(
             deps=deps,
             usage_limits=USAGE_LIMITS,
         )
-    except (ModelAPIError, AgentRunError) as exc:
+    except (ModelAPIError, AgentRunError, FallbackExceptionGroup) as exc:
         logger.exception("Chat run failed")
         raise HTTPException(status_code=502, detail="The assistant could not answer") from exc
 

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.8-flash"
+    # Tried in order when the primary model is overloaded, rate limited, or failing.
+    gemini_fallback_models: list[str] = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    gemini_retry_attempts: int = 2
 
     nhtsa_api_url: str = "https://api.nhtsa.gov"
     vpic_api_url: str = "https://vpic.nhtsa.dot.gov/api"
