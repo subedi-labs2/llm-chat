@@ -1,10 +1,17 @@
 # Consumer Product & Vehicle Safety Assistant
 
-An early foundation for a public-facing assistant that will help people research product and vehicle safety. This repository currently provides a FastAPI health API and a responsive React application shell; recall data and AI features are intentionally out of scope.
+A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with an OpenAI model (via [Pydantic AI](https://ai.pydantic.dev/)) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
+
+## How answers stay grounded
+
+- The model is instructed to state recall facts only from tool results, never from memory, and to ask for missing details (make, model, year, or VIN) instead of guessing.
+- Tools: `decode_vin` (NHTSA vPIC), `search_vehicle_recalls` (NHTSA recalls by make/model/year), and `search_product_recalls` (CPSC, newest first, capped at `MAX_PRODUCT_RECALL_RESULTS`).
+- If a source is unreachable, the tool tells the model so it can say it couldn't check instead of inventing an answer.
+- Response `sources` only include recalls the model cited **and** that were actually retrieved during the request, so citations can't be hallucinated.
 
 ## Structure
 
-- `api/` — FastAPI service managed with uv
+- `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agent and `/api/chat` endpoint)
 - `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
 - `.github/workflows/` — pull request and `main` branch checks
 
@@ -31,7 +38,7 @@ cd api && uv run uvicorn src.main:app --reload
 cd web && npm run dev
 ```
 
-Open <http://localhost:5173>. Vite proxies `/api` requests to the API at `http://localhost:8000` by default. Copy `api/.env.example` to `api/.env` or `web/.env.example` to `web/.env` only when overriding their defaults.
+Set `OPENAI_API_KEY` in `api/.env` (copy `api/.env.example`) to enable chat; without it `/api/chat` returns 503. Open <http://localhost:5173>. Vite proxies `/api` requests to the API at `http://localhost:8000` by default. Copy `api/.env.example` to `api/.env` or `web/.env.example` to `web/.env` only when overriding their defaults.
 
 ## Quality checks
 

@@ -1,7 +1,7 @@
-import { ArrowUp, CheckCircle2, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Chat } from "@/components/chat";
 import { getHealth } from "@/lib/api";
 
 type ApiStatus = "checking" | "connected" | "unavailable";
@@ -62,31 +62,12 @@ function App() {
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-pretty text-slate-600 sm:text-lg">
             Research recalls, understand potential risks, and learn what steps
-            to take next. Safety information and guided research are coming
-            soon.
+            to take next. Answers are grounded in official NHTSA and CPSC recall
+            data.
           </p>
         </section>
 
-        <section className="mt-10 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <label htmlFor="safety-question" className="sr-only">
-            Ask a product safety question
-          </label>
-          <textarea
-            id="safety-question"
-            rows={3}
-            disabled
-            placeholder="Ask about a product or vehicle recall…"
-            className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
-          />
-          <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-            <span className="px-2 text-xs text-slate-600">
-              Research chat coming soon
-            </span>
-            <Button size="icon" disabled aria-label="Send question">
-              <ArrowUp className="size-4" aria-hidden="true" />
-            </Button>
-          </div>
-        </section>
+        <Chat />
 
         <p className="mt-6 text-center text-xs leading-5 text-slate-600">
           Always confirm critical recall information with the manufacturer or
