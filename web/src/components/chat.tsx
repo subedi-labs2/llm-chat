@@ -1,4 +1,4 @@
-import { ArrowUp, ExternalLink, LoaderCircle } from "lucide-react";
+import { ArrowUp, ExternalLink, LoaderCircle, RotateCcw } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -35,6 +35,7 @@ export function Chat() {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failedQuestion, setFailedQuestion] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -44,14 +45,14 @@ export function Chat() {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, [turns, isSending]);
 
-  async function submit() {
-    const content = draft.trim();
-    if (!content || isSending) return;
+  // A failed question stays as the last turn until it is retried or replaced.
+  const answeredTurns = failedQuestion === null ? turns : turns.slice(0, -1);
 
-    const nextTurns: ChatTurn[] = [...turns, { role: "user", content }];
+  async function send(content: string) {
+    const nextTurns: ChatTurn[] = [...answeredTurns, { role: "user", content }];
     setTurns(nextTurns);
-    setDraft("");
     setError(null);
+    setFailedQuestion(null);
     setIsSending(true);
 
     const controller = new AbortController();
@@ -76,8 +77,7 @@ export function Chat() {
     } catch (caught: unknown) {
       if (caught instanceof DOMException && caught.name === "AbortError")
         return;
-      setTurns(turns);
-      setDraft(content);
+      setFailedQuestion(content);
       setError(errorMessage(caught));
     } finally {
       if (abortRef.current === controller) {
@@ -87,9 +87,21 @@ export function Chat() {
     }
   }
 
+  function submit() {
+    const content = draft.trim();
+    if (!content || isSending) return;
+    setDraft("");
+    void send(content);
+  }
+
+  function retry() {
+    if (failedQuestion === null || isSending) return;
+    void send(failedQuestion);
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void submit();
+    submit();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -99,7 +111,7 @@ export function Chat() {
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      void submit();
+      submit();
     }
   }
 
@@ -167,12 +179,24 @@ export function Chat() {
       <div ref={endRef} />
 
       {error && (
-        <p
+        <div
           role="alert"
-          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+          className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
         >
-          {error}
-        </p>
+          <p>{error}</p>
+          {failedQuestion !== null && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={retry}
+              disabled={isSending}
+              className="h-8 shrink-0 px-3"
+            >
+              <RotateCcw className="size-4" aria-hidden="true" />
+              Retry
+            </Button>
+          )}
+        </div>
       )}
 
       <form
