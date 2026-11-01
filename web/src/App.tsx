@@ -88,7 +88,7 @@ function App() {
           </div>
         </section>
 
-        <p className="mt-6 text-center text-xs leading-5 text-slate-400">
+        <p className="mt-6 text-center text-xs leading-5 text-slate-600">
           Always confirm critical recall information with the manufacturer or
           responsible agency.
         </p>
