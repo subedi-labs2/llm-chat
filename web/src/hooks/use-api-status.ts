@@ -44,6 +44,9 @@ export function useApiStatus(): ApiStatus {
 
     const startPolling = () => {
       window.clearInterval(intervalId);
+      if (document.visibilityState !== "visible") {
+        return;
+      }
       check();
       intervalId = window.setInterval(check, POLL_INTERVAL_MS);
     };
