@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from pydantic_ai import (
     ModelMessage,
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -157,12 +158,19 @@ def test_chat_reports_unavailable_source_to_model() -> None:
 
 def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
     calls: list[httpx.Request] = []
+    feedback: list[str] = []
 
     def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        parts = [part for message in messages for part in message.parts]
+        # ModelRetry may surface as a RetryPromptPart or ToolReturnPart depending on
+        # the pydantic-ai version, so key off the earlier tool call instead.
         retried = any(
-            isinstance(part, ToolReturnPart) and part.tool_name == "decode_vin"
-            for message in messages
-            for part in message.parts
+            isinstance(part, ToolCallPart) and part.tool_name == "decode_vin" for part in parts
+        )
+        feedback.extend(
+            str(part.content)
+            for part in parts
+            if isinstance(part, RetryPromptPart | ToolReturnPart) and part.tool_name == "decode_vin"
         )
         if not retried:
             return ModelResponse(parts=[ToolCallPart("decode_vin", {"vin": "OOPS"})])
@@ -176,3 +184,4 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
 
     assert response.status_code == 200
     assert calls == []
+    assert any("17 letters" in text for text in feedback)
