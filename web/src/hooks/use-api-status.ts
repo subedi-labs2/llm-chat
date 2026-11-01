@@ -24,7 +24,11 @@ export function useApiStatus(): ApiStatus {
       timeoutId = window.setTimeout(() => current.abort(), REQUEST_TIMEOUT_MS);
 
       getHealth(current.signal)
-        .then(() => setStatus("connected"))
+        .then(() => {
+          if (controller === current) {
+            setStatus("connected");
+          }
+        })
         .catch(() => {
           // Only the active check may report failure; superseded or cancelled checks are ignored.
           if (controller === current) {
