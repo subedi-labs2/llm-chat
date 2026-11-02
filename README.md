@@ -32,7 +32,7 @@ Start the API and web app together:
 docker compose up --build
 ```
 
-Open <http://localhost:5173>; the API is also available at <http://localhost:8000>. Source folders are mounted into the containers, so code changes reload automatically. To enable chat, set `GEMINI_API_KEY` in `api/.env` (copy `api/.env.example`) and run `docker compose restart api`. After changing dependencies, rebuild with `docker compose up --build`. Stop everything with `docker compose down`.
+Open <http://localhost:5173>; the API is also available at <http://localhost:8000>. Source folders are mounted into the containers, so code changes reload automatically. To enable chat, set `GEMINI_API_KEY` in `api/.env` (copy `api/.env.example`) and run `docker compose restart api`. After changing dependencies, rebuild with `docker compose up --build --renew-anon-volumes`. Stop everything with `docker compose down`.
 
 ### Without Docker
 
