@@ -1,0 +1,32 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    volumes:
+      # api/.env (if present) is picked up through this mount.
+      - ./api:/app
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  web:
+    build: ./web
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./web:/app
+      # Keep the container's node_modules instead of the host's.
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
