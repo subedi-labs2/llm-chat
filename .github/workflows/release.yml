@@ -72,6 +72,7 @@ jobs:
             latest=false
           tags: |
             type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         id: build
@@ -87,9 +88,14 @@ jobs:
 
       - name: Record image digest
         env:
-          IMAGE: ${{ steps.meta.outputs.tags }}
+          TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo "### Published Image" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Image: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Digest: \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Published Image"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "  - \`$tag\`"
+            done <<< "$TAGS"
+            echo "- Digest: \`$DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"
