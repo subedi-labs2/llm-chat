@@ -131,11 +131,13 @@ jobs:
             chart=${chart%/}
             # CI-only values files are not packaged, so they don't need a version bump.
             git diff --quiet "$BASE"...HEAD -- "$chart" ":(exclude)$chart/ci" && continue
+            # New charts have nothing to compare against.
+            git cat-file -e "$BASE:$chart/Chart.yaml" 2>/dev/null || continue
             new=$(yq '.version' "$chart/Chart.yaml")
-            old=$(git show "$BASE:$chart/Chart.yaml" 2>/dev/null | yq '.version' || true)
+            old=$(git show "$BASE:$chart/Chart.yaml" | yq '.version')
             highest=$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n1)
             if [ "$new" = "$old" ] || [ "$highest" != "$new" ]; then
-              echo "::error file=$chart/Chart.yaml::$chart changed, so its version must be bumped above ${old:-nothing} (currently $new)"
+              echo "::error file=$chart/Chart.yaml::$chart changed, so its version must be bumped above $old (currently $new)"
               status=1
             fi
           done
