@@ -67,7 +67,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/safety-assistant-${{ matrix.component }}
+          images: ghcr.io/${{ github.repository_owner }}/llm-chat-${{ matrix.component }}
           flavor: |
             latest=false
           tags: |
@@ -88,7 +88,7 @@ jobs:
 
       - name: Save image digest
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/safety-assistant-${{ matrix.component }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/llm-chat-${{ matrix.component }}
           DIGEST: ${{ steps.build.outputs.digest }}
           COMPONENT: ${{ matrix.component }}
         run: |
