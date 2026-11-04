@@ -14,7 +14,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      components: ${{ github.event_name == 'workflow_dispatch' && '["backend","frontend"]' || steps.filter.outputs.changes }}
+      components: ${{ github.event_name == 'workflow_dispatch' && '["api","web"]' || steps.filter.outputs.changes }}
     steps:
       - uses: actions/checkout@v6
 
@@ -23,10 +23,10 @@ jobs:
         id: filter
         with:
           filters: |
-            backend:
+            api:
               - 'api/**'
               - '.github/workflows/release.yml'
-            frontend:
+            web:
               - 'web/**'
               - '.github/workflows/release.yml'
 
@@ -78,7 +78,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.component == 'backend' && 'api' || 'web' }}
+          context: ${{ matrix.component }}
           target: prod
           push: true
           tags: ${{ steps.meta.outputs.tags }}

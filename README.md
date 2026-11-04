@@ -73,7 +73,7 @@ Use `uv run ruff format .` and `npm run format` to format code. GitHub Actions r
 
 Every push to `main` publishes production images to GitHub Container Registry for whichever of `api/` or `web/` changed (run the **Release Images** workflow manually to publish both):
 
-- `ghcr.io/subedi-labs2/safety-assistant-backend` — FastAPI on port 8000; configure it with the same environment variables as `api/.env.example`.
-- `ghcr.io/subedi-labs2/safety-assistant-frontend` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`).
+- `ghcr.io/subedi-labs2/safety-assistant-api` — FastAPI on port 8000; configure it with the same environment variables as `api/.env.example`.
+- `ghcr.io/subedi-labs2/safety-assistant-web` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`).
 
 Each image is tagged `latest` and `sha-<short commit>`. Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
