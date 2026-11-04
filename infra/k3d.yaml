@@ -1,0 +1,12 @@
+# Local K3s cluster in Docker: k3d cluster create --config infra/k3d.yaml
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: llm-chat
+servers: 1
+agents: 1
+ports:
+  # K3s's bundled Traefik ingress, reachable at http://localhost:8080.
+  - port: 127.0.0.1:8080:80
+    nodeFilters:
+      - loadbalancer

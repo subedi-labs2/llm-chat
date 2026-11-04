@@ -1,0 +1,51 @@
+# Resources are named after the Helm release (release "api" creates Service "api").
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/subedi-labs2/llm-chat-api
+  # tag and digest are updated by the Release Images workflow; the digest is what gets pulled.
+  tag: sha-37b8ce655361a88ba49e7aac064b940be91e1608
+  digest: sha256:0371d61b8cb19d2b5fc9e017618bf1188c52a871543508ce2cfc8ad8973dd17a
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+gemini:
+  # Name of an existing Secret containing the Gemini API key. /api/chat fails without it.
+  existingSecret: ""
+  secretKey: GEMINI_API_KEY
+
+# Additional environment variables, e.g. GEMINI_MODEL (see api/.env.example).
+extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 8000
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

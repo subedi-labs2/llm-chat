@@ -1,0 +1,10 @@
+apiVersion: v2
+name: llm-chat-web
+description: nginx-served web frontend for the consumer product and vehicle safety assistant.
+type: application
+# Bump on every chart change; the Release Charts workflow publishes new versions.
+version: 0.1.0
+appVersion: "sha-37b8ce655361a88ba49e7aac064b940be91e1608"
+home: https://github.com/subedi-labs2/llm-chat
+sources:
+  - https://github.com/subedi-labs2/llm-chat

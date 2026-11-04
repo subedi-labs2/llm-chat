@@ -116,3 +116,58 @@ jobs:
             done <<< "$TAGS"
             echo "- Digest: \`$DIGEST\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Pin the new image in the component's chart via a PR. Uses a GitHub App token
+      # so CI runs on the PR (events from GITHUB_TOKEN don't trigger workflows).
+      - name: Create release bot token
+        if: github.ref == 'refs/heads/main'
+        id: bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Check out main for chart update
+        if: github.ref == 'refs/heads/main'
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: chart-update
+          token: ${{ steps.bot-token.outputs.token }}
+
+      - name: Pin image in chart
+        if: github.ref == 'refs/heads/main'
+        working-directory: chart-update/charts/${{ matrix.component }}
+        env:
+          TAG: sha-${{ github.sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          # sed keeps comments and blank lines intact; yq then verifies the result.
+          sed -i -E "s|^(  tag: ).*|\1$TAG|; s|^(  digest: ).*|\1$DIGEST|" values.yaml
+          [ "$(yq '.image.tag' values.yaml)" = "$TAG" ] && [ "$(yq '.image.digest' values.yaml)" = "$DIGEST" ]
+          if git diff --quiet -- values.yaml; then
+            echo "Chart already pins $DIGEST"
+            exit 0
+          fi
+          IFS=. read -r major minor patch <<< "$(yq '.version' Chart.yaml)"
+          next="$major.$minor.$((patch + 1))"
+          sed -i -E "s|^version: .*|version: $next|; s|^appVersion: .*|appVersion: \"$TAG\"|" Chart.yaml
+          [ "$(yq '.version' Chart.yaml)" = "$next" ]
+
+      - name: Open chart update PR
+        if: github.ref == 'refs/heads/main'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: chart-update
+          token: ${{ steps.bot-token.outputs.token }}
+          branch: bot/pin-${{ matrix.component }}-image
+          delete-branch: true
+          commit-message: "chore(charts): pin ${{ matrix.component }} image to sha-${{ github.sha }}"
+          title: "chore(charts): pin ${{ matrix.component }} image to sha-${{ github.sha }}"
+          body: |
+            Pins `charts/${{ matrix.component }}` to the image built from ${{ github.sha }} and bumps the chart's patch version.
+
+            - Digest: `${{ steps.build.outputs.digest }}`
+            - Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Merging publishes the new chart version to `oci://ghcr.io/${{ github.repository_owner }}/charts/llm-chat-${{ matrix.component }}`.
