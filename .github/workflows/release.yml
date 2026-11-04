@@ -1,3 +1,4 @@
+
 name: Release Images
 
 on:
@@ -7,10 +8,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: release-images
-  cancel-in-progress: false
 
 jobs:
   changes:
@@ -38,13 +35,21 @@ jobs:
     needs: changes
     if: needs.changes.outputs.components != '[]'
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
+
     strategy:
       fail-fast: false
       matrix:
         component: ${{ fromJSON(needs.changes.outputs.components) }}
+
+    concurrency:
+      group: release-images-${{ matrix.component }}
+      cancel-in-progress: false
+      queue: max
+
     steps:
       - uses: actions/checkout@v6
 
@@ -63,11 +68,14 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/safety-assistant-${{ matrix.component }}
+          flavor: |
+            latest=false
           tags: |
-            type=raw,value=latest
-            type=sha
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.component == 'backend' && 'api' || 'web' }}
@@ -77,3 +85,34 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Save image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/safety-assistant-${{ matrix.component }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          mkdir -p artifacts
+          echo "${IMAGE}@${DIGEST}" > "artifacts/${COMPONENT}.txt"
+
+      - name: Upload image digest artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-digest-${{ matrix.component }}
+          path: artifacts/${{ matrix.component }}.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record image digest
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### Published Image"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "  - \`$tag\`"
+            done <<< "$TAGS"
+            echo "- Digest: \`$DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"
