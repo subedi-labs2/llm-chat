@@ -110,11 +110,13 @@ jobs:
             | sudo tar xz -C /usr/local/bin kubeconform
 
       - name: Lint and validate
+        shell: bash
         run: |
           for chart in charts/*/; do
             chart=${chart%/}
             helm lint --strict "$chart"
             helm template ci "$chart" | kubeconform -strict -summary
+
             for values in "$chart"/ci/*.yaml; do
               [ -e "$values" ] || continue
               helm template ci "$chart" -f "$values" | kubeconform -strict -summary
