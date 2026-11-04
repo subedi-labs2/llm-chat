@@ -86,6 +86,23 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
+      - name: Save image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/safety-assistant-${{ matrix.component }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          mkdir -p artifacts
+          echo "${IMAGE}@${DIGEST}" > "artifacts/${COMPONENT}.txt"
+
+      - name: Upload image digest artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-digest-${{ matrix.component }}
+          path: artifacts/${{ matrix.component }}.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Record image digest
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
