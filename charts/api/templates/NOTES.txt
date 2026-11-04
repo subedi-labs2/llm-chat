@@ -1,0 +1,10 @@
+API Service: http://{{ include "llm-chat-api.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Point the web chart at it with:
+  --set apiUpstream=http://{{ include "llm-chat-api.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+{{- if not .Values.gemini.existingSecret }}
+
+WARNING: gemini.existingSecret is not set, so /api/chat will fail. Create a Secret and set it:
+  kubectl -n {{ .Release.Namespace }} create secret generic llm-chat-api --from-literal={{ .Values.gemini.secretKey }}=<key>
+  helm upgrade {{ .Release.Name }} ... --set gemini.existingSecret=llm-chat-api
+{{- end }}

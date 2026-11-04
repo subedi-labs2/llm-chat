@@ -1,0 +1,7 @@
+ingress:
+  enabled: true
+  className: traefik
+  host: chat.example.com
+  tls:
+    - hosts: [chat.example.com]
+      secretName: chat-tls

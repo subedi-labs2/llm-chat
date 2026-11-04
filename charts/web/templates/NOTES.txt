@@ -1,0 +1,10 @@
+Web proxies /api to: {{ tpl .Values.apiUpstream . }}
+{{- if .Values.ingress.enabled }}
+
+Open: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host | default "<ingress address>" }}/
+{{- else }}
+
+Open locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "llm-chat-web.fullname" . }} 8080:{{ .Values.service.port }}
+  then browse to http://localhost:8080
+{{- end }}

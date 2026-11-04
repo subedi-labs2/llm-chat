@@ -1,0 +1,56 @@
+name: Release Charts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - '.github/workflows/release-charts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-charts
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish Charts
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+
+      - name: Log in to GitHub Container Registry
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+
+      - name: Publish new chart versions
+        env:
+          REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          echo "### Charts" >> "$GITHUB_STEP_SUMMARY"
+          for chart in charts/*/; do
+            name=$(yq '.name' "$chart/Chart.yaml")
+            version=$(yq '.version' "$chart/Chart.yaml")
+            if helm show chart "$REGISTRY/$name" --version "$version" >/dev/null 2>&1; then
+              echo "- \`$name\` $version already published" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            helm package "$chart" --destination dist
+            helm push "dist/$name-$version.tgz" "$REGISTRY"
+            echo "- Published \`$REGISTRY/$name\` $version" >> "$GITHUB_STEP_SUMMARY"
+          done

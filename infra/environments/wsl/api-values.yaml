@@ -1,0 +1,2 @@
+gemini:
+  existingSecret: llm-chat-api

@@ -1,0 +1,55 @@
+# Resources are named after the Helm release (release "web" creates Service "web").
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/subedi-labs2/llm-chat-web
+  # tag and digest are updated by the Release Images workflow; the digest is what gets pulled.
+  tag: sha-37b8ce655361a88ba49e7aac064b940be91e1608
+  digest: sha256:dd26fd3ab15343466c0ef54f891e4e1cf438fa3eb364e92ce5cac2a240571761
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Where nginx proxies /api requests. Must be a fully qualified name because nginx's
+# resolver ignores DNS search domains. Templated, so the default follows the release namespace.
+apiUpstream: "http://api.{{ .Release.Namespace }}.svc.cluster.local:8000"
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Leave empty to match any host (e.g. http://localhost on k3d).
+  host: ""
+  tls: []
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

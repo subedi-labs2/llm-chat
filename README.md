@@ -13,7 +13,9 @@ A public-facing assistant that helps people research product and vehicle safety.
 
 - `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agent and `/api/chat` endpoint)
 - `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
-- `.github/workflows/` — pull request and `main` branch checks
+- `charts/` — Helm charts for the API and web, released independently
+- `infra/` — local k3d cluster config and per-environment chart values
+- `.github/workflows/` — pull request and `main` branch checks, image and chart releases
 
 ## Prerequisites
 
@@ -77,3 +79,43 @@ Every push to `main` publishes production images to GitHub Container Registry fo
 - `ghcr.io/subedi-labs2/llm-chat-web` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`). The API address is looked up per request, so web starts before the API exists. In Kubernetes, set `API_UPSTREAM` to the Service's fully qualified name, such as `http://api.<namespace>.svc.cluster.local:8000`.
 
 Each image is tagged `latest` and `sha-<full commit SHA>`. Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
+
+## Kubernetes (Helm)
+
+The API and web have separate Helm charts, published to GHCR as OCI artifacts:
+
+- `oci://ghcr.io/subedi-labs2/charts/llm-chat-api` — Service named after the release (install as `api`).
+- `oci://ghcr.io/subedi-labs2/charts/llm-chat-web` — proxies `/api` to `http://api.<release namespace>.svc.cluster.local:8000` by default; override with `apiUpstream`.
+
+Install the API and web in either order. Web returns 502 for `/api` until the API is ready.
+
+### Local cluster (k3d, e.g. on WSL2)
+
+Requires Docker, [k3d](https://k3d.io), kubectl, and Helm.
+
+```bash
+k3d cluster create --config infra/k3d.yaml
+
+kubectl create namespace llm-chat
+read -rsp "Gemini API key: " key && echo
+kubectl -n llm-chat create secret generic llm-chat-api --from-literal=GEMINI_API_KEY="$key"
+
+helm upgrade --install api oci://ghcr.io/subedi-labs2/charts/llm-chat-api \
+  -n llm-chat -f infra/environments/wsl/api-values.yaml --wait
+helm upgrade --install web oci://ghcr.io/subedi-labs2/charts/llm-chat-web \
+  -n llm-chat -f infra/environments/wsl/web-values.yaml --wait
+```
+
+Open http://localhost:8080. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api` or `charts/web` instead of the `oci://` reference.
+
+### Releases
+
+1. A push to `main` that changes `api/` or `web/` publishes a new image. The **Release Images** workflow then opens a PR that pins that image's digest in the chart and bumps the chart's patch version.
+2. CI lints and validates the charts, requires a version bump for any chart change, and installs both charts into a kind cluster.
+3. Merging a chart change runs **Release Charts**, which publishes any chart version not already in GHCR.
+
+The chart PR is opened by a GitHub App so CI runs on it. One-time setup:
+
+1. Create a GitHub App owned by the organization, with webhooks disabled and repository permissions **Contents: Read and write** and **Pull requests: Read and write**. Install it on this repository only.
+2. In this repository's **Settings → Secrets and variables → Actions**, add the variable `RELEASE_BOT_CLIENT_ID` (the App's client ID) and the secret `RELEASE_BOT_PRIVATE_KEY` (a private key generated for the App).
+

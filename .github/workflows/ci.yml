@@ -17,6 +17,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      charts: ${{ steps.filter.outputs.charts }}
     steps:
       - uses: actions/checkout@v6
 
@@ -30,6 +31,9 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'web/**'
+              - '.github/workflows/ci.yml'
+            charts:
+              - 'charts/**'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -84,3 +88,101 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+
+  charts:
+    name: Charts
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
+
+      - name: Lint and validate
+        shell: bash
+        run: |
+          for chart in charts/*/; do
+            chart=${chart%/}
+            helm lint --strict "$chart"
+            helm template ci "$chart" | kubeconform -strict -summary
+
+            for values in "$chart"/ci/*.yaml; do
+              [ -e "$values" ] || continue
+              helm template ci "$chart" -f "$values" | kubeconform -strict -summary
+            done
+          done
+
+      - name: Check chart versions were bumped
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          status=0
+          for chart in charts/*/; do
+            chart=${chart%/}
+            # CI-only values files are not packaged, so they don't need a version bump.
+            git diff --quiet "$BASE"...HEAD -- "$chart" ":(exclude)$chart/ci" && continue
+            # New charts have nothing to compare against.
+            git cat-file -e "$BASE:$chart/Chart.yaml" 2>/dev/null || continue
+            new=$(yq '.version' "$chart/Chart.yaml")
+            old=$(git show "$BASE:$chart/Chart.yaml" | yq '.version')
+            highest=$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n1)
+            if [ "$new" = "$old" ] || [ "$highest" != "$new" ]; then
+              echo "::error file=$chart/Chart.yaml::$chart changed, so its version must be bumped above $old (currently $new)"
+              status=1
+            fi
+          done
+          exit $status
+
+  charts-install:
+    name: Charts Install Test
+    needs: [changes, charts]
+    if: needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Install charts
+        run: |
+          kubectl create namespace llm-chat
+          kubectl -n llm-chat create secret generic llm-chat-api --from-literal=GEMINI_API_KEY=ci-placeholder
+          # Install web first: it must start even when the API does not exist yet.
+          helm install web charts/web -n llm-chat --wait --timeout 3m
+          helm install api charts/api -n llm-chat --set gemini.existingSecret=llm-chat-api --wait --timeout 3m
+
+      - name: Check API health through web
+        run: |
+          kubectl -n llm-chat port-forward svc/web 8080:80 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/health; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Show diagnostics
+        if: failure()
+        run: |
+          kubectl -n llm-chat get all
+          kubectl -n llm-chat get events --sort-by=.lastTimestamp
+          kubectl -n llm-chat describe pods
+          kubectl -n llm-chat logs deployment/web --all-containers || true
+          kubectl -n llm-chat logs deployment/api --all-containers || true
