@@ -14,7 +14,7 @@ A public-facing assistant that helps people research product and vehicle safety.
 - `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agent and `/api/chat` endpoint)
 - `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
 - `charts/` — Helm charts for the API and web, released independently
-- `infra/` — local k3d cluster config and per-environment chart values
+- `infra/` — local k3d cluster config, per-environment chart values, and the Cloudflare Tunnel connector
 - `.github/workflows/` — pull request and `main` branch checks, image and chart releases
 
 ## Prerequisites
@@ -107,6 +107,29 @@ helm upgrade --install web oci://ghcr.io/subedi-labs2/charts/llm-chat-web \
 ```
 
 Open http://localhost:8080. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api` or `charts/web` instead of the `oci://` reference.
+
+### Public access (Cloudflare Tunnel)
+
+Expose the local cluster on a public domain (for example `llmchat.pukarsubedi.com`) without port forwarding. The domain's DNS must be managed by Cloudflare.
+
+1. In the Cloudflare Zero Trust dashboard, open **Networks → Tunnels → Create a tunnel**, choose **Cloudflared**, and name it. Copy the token: the `eyJ…` string after `--token` in the shown command. Do not run the command itself.
+2. Run the connector in the cluster:
+
+   ```bash
+   read -rsp "Tunnel token (eyJ...): " token && echo
+   kubectl -n llm-chat create secret generic cloudflared --from-literal=token="$token"
+   kubectl apply -n llm-chat -f infra/environments/wsl/cloudflared.yaml
+   kubectl -n llm-chat rollout status deploy/cloudflared
+   ```
+
+3. Back in the dashboard, click **Continue** once the connector shows as connected, then add a public hostname:
+   - **Subdomain / Domain:** `llmchat` / `pukarsubedi.com`
+   - **Service:** `HTTP` → `traefik.kube-system.svc.cluster.local:80`
+4. Open https://llmchat.pukarsubedi.com.
+
+The site is only up while the machine and cluster are running. The app has no login, so consider protecting the hostname with **Zero Trust → Access → Applications** to keep others from using your Gemini quota.
+
+Troubleshooting: `kubectl -n llm-chat logs -l app=cloudflared`. `Provided Tunnel token is not valid` means the secret holds more than the `eyJ…` token; recreate it with `kubectl -n llm-chat delete secret cloudflared` and repeat step 2.
 
 ### Releases
 
