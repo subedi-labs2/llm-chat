@@ -122,9 +122,10 @@ Expose the local cluster on a public domain (for example `llmchat.pukarsubedi.co
    kubectl -n llm-chat rollout status deploy/cloudflared
    ```
 
-3. Back in the dashboard, click **Continue** once the connector shows as connected, then add a public hostname:
+3. Back in the dashboard, click **Continue** once the connector shows as connected, then add a published application (route):
    - **Subdomain / Domain:** `llmchat` / `pukarsubedi.com`
-   - **Service:** `HTTP` → `traefik.kube-system.svc.cluster.local:80`
+   - **Service URL:** `http://traefik.kube-system.svc.cluster.local:80` (not `localhost`, which is the cloudflared pod itself)
+   - Leave the other settings at their defaults.
 4. Open https://llmchat.pukarsubedi.com.
 
 The site is only up while the machine and cluster are running. The app has no login, so consider protecting the hostname with **Zero Trust → Access → Applications** to keep others from using your Gemini quota.
