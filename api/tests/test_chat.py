@@ -248,6 +248,26 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
     assert any("17 letters" in text for text in feedback)
 
 
+@pytest.mark.parametrize(("failures", "status"), [(2, 200), (3, 502)])
+def test_chat_limits_invalid_structured_answers(failures: int, status: int) -> None:
+    model_calls: list[list[ModelMessage]] = []
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        model_calls.append(messages)
+        name = info.output_tools[0].name
+        if len(model_calls) <= failures:
+            return ModelResponse(parts=[ToolCallPart(name, {"cited_recall_ids": []})])
+        output = {"answer": "Please tell me the year, make, and model.", "cited_recall_ids": []}
+        return ModelResponse(parts=[ToolCallPart(name, output)])
+
+    app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Is my car recalled?")]})
+
+    assert response.status_code == status
+
+
 def test_chat_returns_502_when_tool_exceeds_retries() -> None:
     model_calls: list[list[ModelMessage]] = []
     calls: list[httpx.Request] = []

@@ -30,6 +30,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langgraph.errors import GraphRecursionError
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import SecretStr
 
@@ -61,9 +62,9 @@ class LangChainChatModel:
 @dataclass
 class LangChainDeps(ChatDeps):
     output_retries: int = 0
-    # Consecutive failed steps per tool, and the graph step of each tool's latest failure.
+    # Retries used per tool as of the current step, and the tools that failed in this step.
     tool_retries: dict[str, int] = field(default_factory=dict)
-    tool_failure_steps: dict[str, int] = field(default_factory=dict)
+    failed_tools: set[str] = field(default_factory=set)
 
 
 class ToolRetry(Exception):
@@ -74,7 +75,11 @@ class ToolRetriesExceededError(Exception):
     """A tool kept failing after MAX_RETRIES retries."""
 
 
-class UngroundedAnswerError(Exception):
+class OutputRetriesExceededError(Exception):
+    """The model kept returning answers that failed validation after MAX_RETRIES retries."""
+
+
+class UngroundedAnswerError(OutputRetriesExceededError):
     """The model kept referencing recalls that no tool returned."""
 
 
@@ -85,6 +90,7 @@ LANGCHAIN_RUN_ERRORS: tuple[type[Exception], ...] = (
     GraphRecursionError,
     LangChainException,
     ModelCallLimitExceededError,
+    OutputRetriesExceededError,
     StructuredOutputError,
     ToolCallLimitExceededError,
     ToolRetriesExceededError,
@@ -191,9 +197,19 @@ class LimitToolRetries(AgentMiddleware[Any, LangChainDeps]):
     """Return tool errors to the model, but fail the run once a tool exhausts its retries.
 
     Mirrors Pydantic AI's per-tool retry budget: ToolRetry and invalid-argument errors are
-    sent back to the model, each tool may fail on MAX_RETRIES consecutive steps (failures in
-    the same step count once), and a successful call resets that tool's count.
+    sent back to the model, and the budget is updated once per step from that step's
+    aggregate results, so parallel calls can't change the outcome by finishing in a
+    different order. A tool that failed in the previous step uses one more retry; any other
+    tool's count resets. A failure once a tool has used MAX_RETRIES fails the run.
     """
+
+    async def abefore_model(
+        self, state: Any, runtime: Runtime[LangChainDeps]
+    ) -> dict[str, Any] | None:
+        deps = runtime.context
+        deps.tool_retries = {name: deps.tool_retries.get(name, 0) + 1 for name in deps.failed_tools}
+        deps.failed_tools = set()
+        return None
 
     async def awrap_tool_call(
         self,
@@ -202,34 +218,33 @@ class LimitToolRetries(AgentMiddleware[Any, LangChainDeps]):
     ) -> ToolMessage | Command:
         deps: LangChainDeps = request.runtime.context
         name = request.tool_call["name"]
-        step = request.runtime.config.get("metadata", {}).get("langgraph_step")
         try:
             result = await handler(request)
         except ToolRetry as exc:
             result = ToolMessage(
                 str(exc), tool_call_id=request.tool_call["id"], name=name, status="error"
             )
-        failed = isinstance(result, ToolMessage) and result.status == "error"
-        if not failed:
-            if deps.tool_failure_steps.get(name) != step:
-                deps.tool_retries.pop(name, None)
-            return result
-        if deps.tool_failure_steps.get(name) != step:
-            retries = deps.tool_retries.get(name, 0)
-            if retries >= MAX_RETRIES:
+        if isinstance(result, ToolMessage) and result.status == "error":
+            if deps.tool_retries.get(name, 0) >= MAX_RETRIES:
                 raise ToolRetriesExceededError(
                     f"Tool {name!r} exceeded max retries count of {MAX_RETRIES}"
                 )
-            deps.tool_retries[name] = retries + 1
-            deps.tool_failure_steps[name] = step
+            deps.failed_tools.add(name)
         return result
+
+
+def is_answer_feedback(message: AnyMessage) -> bool:
+    # ToolStrategy answers an invalid ChatAnswer call with a ToolMessage and no structured
+    # response, then asks the model again.
+    return isinstance(message, ToolMessage) and message.name == ChatAnswer.__name__
 
 
 class RequireRetrievedRecalls(AgentMiddleware[Any, LangChainDeps]):
     """Reject answers that cite or mention recalls not retrieved by a tool in this request.
 
     Rejected answers are returned to the model as an error on its structured-output tool call,
-    which makes the agent loop ask the model again.
+    which makes the agent loop ask the model again. Answers that fail ChatAnswer's schema use
+    the same MAX_RETRIES budget, like Pydantic AI's output retries.
     """
 
     async def awrap_model_call(
@@ -239,9 +254,15 @@ class RequireRetrievedRecalls(AgentMiddleware[Any, LangChainDeps]):
     ) -> ModelResponse:
         response = await handler(request)
         output = response.structured_response
-        if not isinstance(output, ChatAnswer):
-            return response
         deps = request.runtime.context
+        if not isinstance(output, ChatAnswer):
+            if any(is_answer_feedback(m) for m in response.result):
+                if deps.output_retries >= MAX_RETRIES:
+                    raise OutputRetriesExceededError(
+                        f"Exceeded maximum output retries ({MAX_RETRIES})"
+                    )
+                deps.output_retries += 1
+            return response
         feedback = grounding_feedback(output, deps.sources)
         if feedback is None:
             return ModelResponse(

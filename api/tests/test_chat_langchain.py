@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Callable, Iterator, Sequence
 from typing import Annotated, Any
@@ -14,7 +15,8 @@ from pydantic import SecretStr
 from pydantic_ai import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from src.chat.langchain_agent import LangChainChatModel
+from src.chat import langchain_agent
+from src.chat.langchain_agent import LangChainChatModel, LimitToolRetries, ToolRetry
 from src.chat.router import ChatModel, get_agent_backend, get_chat_model
 from src.core.config import Settings, get_settings
 from src.main import app
@@ -184,6 +186,52 @@ def test_never_publishes_persistently_unsupported_recalls() -> None:
     assert len(feedback) == 2
 
 
+@pytest.mark.parametrize(("failures", "status"), [(2, 200), (3, 502)])
+def test_limits_invalid_structured_answers(failures: int, status: int) -> None:
+    feedback: list[str] = []
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        feedback[:] = [str(m.content) for m in tool_messages(messages, "ChatAnswer")]
+        if len(feedback) < failures:
+            return call("ChatAnswer", {"cited_recall_ids": []})
+        return answer("Please tell me the year, make, and model.")
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Is my car recalled?")]})
+
+    assert response.status_code == status
+    assert len(feedback) == min(failures, 2)
+
+
+def test_schema_and_grounding_failures_share_output_retries() -> None:
+    replies = [
+        lambda: call("ChatAnswer", {"cited_recall_ids": []}),
+        lambda: answer("Recall 99V999000 applies."),
+        lambda: call("ChatAnswer", {"cited_recall_ids": []}),
+    ]
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        return replies[len(tool_messages(messages, "ChatAnswer"))]()
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Is my car recalled?")]})
+
+    assert response.status_code == 502
+
+
+def test_returns_502_when_model_gives_no_structured_answer() -> None:
+    use_model(lambda _: AIMessage(""))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Is my car recalled?")]})
+
+    assert response.status_code == 502
+
+
 def test_reports_unavailable_source_to_model() -> None:
     seen: list[str] = []
 
@@ -279,6 +327,49 @@ def test_counts_failures_in_one_step_as_one_retry() -> None:
     response = post_chat({"messages": [user("My VINs are OOPS, OOPS, and OOPS")]})
 
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("valid_first", [True, False], ids=["valid_first", "invalid_first"])
+def test_counts_mixed_parallel_calls_as_failed_step(
+    valid_first: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FinishInOrder(LimitToolRetries):
+        """Delay one outcome so parallel calls finish in a chosen order."""
+
+        async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+            async def ordered(req: Any) -> Any:
+                try:
+                    result = await handler(req)
+                except ToolRetry:
+                    if valid_first:
+                        await asyncio.sleep(0.05)
+                    raise
+                if not valid_first:
+                    await asyncio.sleep(0.05)
+                return result
+
+            return await super().awrap_tool_call(request, ordered)
+
+    monkeypatch.setattr(langchain_agent, "LimitToolRetries", FinishInOrder)
+    bad = {"recall_date_start": "2025-01-01"}
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        step = len([m for m in messages if isinstance(m, AIMessage)])
+        if step > 2:
+            return answer("Which stroller brand should I check?")
+        message = call("search_product_recalls", bad)
+        if step == 2:
+            good = {**message.tool_calls[0], "id": "good", "args": {"product_name": "stroller"}}
+            message.tool_calls = [message.tool_calls[0], good]
+        return message
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(200, json=[]))
+
+    response = post_chat({"messages": [user("Any stroller recalls?")]})
+
+    # After two failed steps, a step with any failure exhausts the budget regardless of order.
+    assert response.status_code == 502
 
 
 def test_answers_from_cpsc_search_with_verified_sources() -> None:

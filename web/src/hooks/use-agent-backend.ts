@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getChatConfig, type AgentBackend } from "@/lib/api";
 
 const STORAGE_KEY = "agent-backend";
+const CONFIG_RETRY_MS = 3_000;
 
 function isAgentBackend(value: unknown): value is AgentBackend {
   return value === "pydantic_ai" || value === "langchain";
@@ -25,11 +26,13 @@ export interface AgentBackendSelection {
 
 export function useAgentBackend(apiConnected: boolean): AgentBackendSelection {
   const [loaded, setLoaded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [backend, setBackendState] = useState<AgentBackend | null>(null);
 
   useEffect(() => {
     if (!apiConnected || loaded) return;
     const controller = new AbortController();
+    let retryId: number | undefined;
     getChatConfig(controller.signal)
       .then((config) => {
         setLoaded(true);
@@ -38,10 +41,18 @@ export function useAgentBackend(apiConnected: boolean): AgentBackendSelection {
         }
       })
       .catch(() => {
-        // Retried on the next reconnect; until then the API's default backend is used.
+        // Until the config loads, the API's default backend is used.
+        if (controller.signal.aborted) return;
+        retryId = window.setTimeout(
+          () => setAttempt((n) => n + 1),
+          CONFIG_RETRY_MS,
+        );
       });
-    return () => controller.abort();
-  }, [apiConnected, loaded]);
+    return () => {
+      controller.abort();
+      window.clearTimeout(retryId);
+    };
+  }, [apiConnected, loaded, attempt]);
 
   function setBackend(next: AgentBackend) {
     setBackendState(next);
