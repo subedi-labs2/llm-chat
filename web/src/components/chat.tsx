@@ -9,8 +9,10 @@ import {
 
 import { Button } from "@/components/ui/button";
 import {
+  AGENT_BACKEND_LABELS,
   ChatError,
   sendChat,
+  type AgentBackend,
   type ChatMessage,
   type ChatSource,
 } from "@/lib/api";
@@ -21,6 +23,12 @@ const MAX_HISTORY_MESSAGES = 19;
 
 interface ChatTurn extends ChatMessage {
   sources?: ChatSource[];
+  backend?: AgentBackend;
+}
+
+interface ChatProps {
+  /** The agent backend to request, or null to use the API's default. */
+  backend: AgentBackend | null;
 }
 
 function errorMessage(error: unknown): string {
@@ -30,7 +38,7 @@ function errorMessage(error: unknown): string {
   return "Something went wrong while researching your question. Please try again.";
 }
 
-export function Chat() {
+export function Chat({ backend }: ChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -64,6 +72,7 @@ export function Chat() {
       const firstUser = history.findIndex((turn) => turn.role === "user");
       const response = await sendChat(
         history.slice(firstUser),
+        backend,
         controller.signal,
       );
       setTurns([
@@ -72,6 +81,7 @@ export function Chat() {
           role: "assistant",
           content: response.answer,
           sources: response.sources,
+          backend: response.backend,
         },
       ]);
     } catch (caught: unknown) {
@@ -162,6 +172,11 @@ export function Chat() {
                     ))}
                   </ul>
                 </div>
+              )}
+              {backend !== null && turn.backend && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Answered with {AGENT_BACKEND_LABELS[turn.backend]}
+                </p>
               )}
             </li>
           ))}

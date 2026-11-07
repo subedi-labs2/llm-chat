@@ -21,7 +21,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.google import GoogleModel
 
 from src.chat.agent import mentioned_campaign_numbers
-from src.chat.router import get_chat_model, get_recall_client
+from src.chat.langchain_agent import LangChainChatModel
+from src.chat.router import get_agent_backend, get_chat_model, get_recall_client
+from src.chat.schemas import ChatMessage, ChatRequest
 from src.core.config import Settings, get_settings
 from src.main import app
 from src.recalls.client import RecallClient
@@ -208,7 +210,11 @@ def test_chat_reports_unavailable_source_to_model() -> None:
     response = post_chat({"messages": [user("Recalls for 2018 Honda Accord?")]})
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "I couldn't reach NHTSA right now.", "sources": []}
+    assert response.json() == {
+        "answer": "I couldn't reach NHTSA right now.",
+        "sources": [],
+        "backend": "pydantic_ai",
+    }
 
 
 def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
@@ -240,6 +246,45 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
     assert response.status_code == 200
     assert calls == []
     assert any("17 letters" in text for text in feedback)
+
+
+@pytest.mark.parametrize(("failures", "status"), [(2, 200), (3, 502)])
+def test_chat_limits_invalid_structured_answers(failures: int, status: int) -> None:
+    model_calls: list[list[ModelMessage]] = []
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        model_calls.append(messages)
+        name = info.output_tools[0].name
+        if len(model_calls) <= failures:
+            return ModelResponse(parts=[ToolCallPart(name, {"cited_recall_ids": []})])
+        output = {"answer": "Please tell me the year, make, and model.", "cited_recall_ids": []}
+        return ModelResponse(parts=[ToolCallPart(name, output)])
+
+    app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Is my car recalled?")]})
+
+    assert response.status_code == status
+
+
+def test_chat_returns_502_when_tool_exceeds_retries() -> None:
+    model_calls: list[list[ModelMessage]] = []
+    calls: list[httpx.Request] = []
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        model_calls.append(messages)
+        return ModelResponse(parts=[ToolCallPart("decode_vin", {"vin": "OOPS"})])
+
+    app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json={}))
+
+    response = post_chat({"messages": [user("My VIN is OOPS")]})
+
+    # retries=2: two failures are fed back to the model, the third fails the run.
+    assert response.status_code == 502
+    assert len(model_calls) == 3
+    assert calls == []
 
 
 def retry_feedback(messages: list[ModelMessage]) -> list[str]:
@@ -396,6 +441,7 @@ def test_chat_answers_from_cpsc_search_with_verified_sources() -> None:
                 "url": "https://www.cpsc.gov/Recalls/25001",
             }
         ],
+        "backend": "pydantic_ai",
     }
     assert [request.url.path for request in requests] == ["/RestWebServices/Recall"]
     assert requests[0].url.params["ProductName"] == "stroller"
@@ -416,7 +462,11 @@ def test_chat_reports_unavailable_cpsc_source_to_model() -> None:
     response = post_chat({"messages": [user("Any recalls on Acme strollers?")]})
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "I couldn't reach the CPSC right now.", "sources": []}
+    assert response.json() == {
+        "answer": "I couldn't reach the CPSC right now.",
+        "sources": [],
+        "backend": "pydantic_ai",
+    }
     assert seen_results[0]["agency"] == "CPSC"
     assert "503" in seen_results[0]["error"]
 
@@ -446,3 +496,43 @@ def test_chat_requires_cpsc_search_terms_before_calling_cpsc() -> None:
     assert response.status_code == 200
     assert calls == []
     assert any("product_name, manufacturer, or recall_number" in text for text in feedback)
+
+
+def test_chat_config_reports_backend_selection() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        agent_backend="langchain", allow_backend_selection=True
+    )
+
+    async def request() -> Response:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/api/chat/config")
+
+    response = asyncio.run(request())
+
+    assert response.status_code == 200
+    assert response.json() == {"default_backend": "langchain", "backend_selection": True}
+
+
+@pytest.mark.parametrize(
+    ("allow", "requested", "expected"),
+    [
+        (True, "langchain", "langchain"),
+        (True, None, "pydantic_ai"),
+        (False, "langchain", "pydantic_ai"),
+    ],
+)
+def test_agent_backend_honors_request_only_when_selection_allowed(
+    allow: bool, requested: str | None, expected: str
+) -> None:
+    body = ChatRequest(messages=[ChatMessage(role="user", content="hi")], backend=requested)
+    settings = Settings(allow_backend_selection=allow)
+
+    assert get_agent_backend(body, settings) == expected
+
+
+def test_chat_builds_model_for_selected_backend() -> None:
+    settings = Settings(gemini_api_key=SecretStr("test-key"), gemini_fallback_models=[])
+
+    assert isinstance(get_chat_model(settings, "langchain"), LangChainChatModel)
+    assert isinstance(get_chat_model(settings, "pydantic_ai"), GoogleModel)
