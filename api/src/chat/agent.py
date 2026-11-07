@@ -4,7 +4,7 @@ from datetime import date
 
 import pydantic_ai
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
 
 from src.chat.schemas import Source
 from src.recalls.client import RecallClient, RecallSourceError
@@ -16,6 +16,9 @@ from src.recalls.schemas import (
 )
 
 pydantic_ai.BANNER_ENABLED = False
+
+# Per-request budget shared by both agent backends.
+USAGE_LIMITS = UsageLimits(request_limit=8, tool_calls_limit=6)
 
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 # NHTSA campaign numbers, written either as 18V268000 or in the short form 18V-268.
@@ -85,19 +88,49 @@ def mentioned_campaign_numbers(text: str) -> list[str]:
     ]
 
 
+def grounding_feedback(output: ChatAnswer, sources: dict[str, Source]) -> str | None:
+    """Return correction feedback if the answer references recalls no tool returned."""
+    cited = [recall_id.strip() for recall_id in output.cited_recall_ids]
+    referenced = dict.fromkeys([*cited, *mentioned_campaign_numbers(output.answer)])
+    unsupported = [recall_id for recall_id in referenced if recall_id not in sources]
+    if not unsupported:
+        return None
+    return (
+        f"These recalls were not returned by a tool during this request: "
+        f"{', '.join(unsupported)}. Search again to retrieve them, or remove them and any "
+        "claims about them from the answer."
+    )
+
+
+def with_unique_citations(output: ChatAnswer) -> ChatAnswer:
+    cited = [recall_id.strip() for recall_id in output.cited_recall_ids]
+    return output.model_copy(update={"cited_recall_ids": list(dict.fromkeys(cited))})
+
+
+def record_vehicle_sources(results: VehicleRecallResults, sources: dict[str, Source]) -> None:
+    for recall in results.recalls:
+        sources[recall.campaign_number] = Source(
+            id=recall.campaign_number,
+            agency="NHTSA",
+            title=f"{recall.model_year} {recall.make} {recall.model}: {recall.component}",
+            url=recall.url,
+        )
+
+
+def record_product_sources(results: ProductRecallResults, sources: dict[str, Source]) -> None:
+    for recall in results.recalls:
+        if recall.recall_number and recall.url:
+            sources[recall.recall_number] = Source(
+                id=recall.recall_number, agency="CPSC", title=recall.title, url=recall.url
+            )
+
+
 @recall_agent.output_validator
 def require_retrieved_recalls(ctx: RunContext[ChatDeps], output: ChatAnswer) -> ChatAnswer:
     """Reject answers that cite or mention recalls not retrieved by a tool in this request."""
-    cited = [recall_id.strip() for recall_id in output.cited_recall_ids]
-    referenced = dict.fromkeys([*cited, *mentioned_campaign_numbers(output.answer)])
-    unsupported = [recall_id for recall_id in referenced if recall_id not in ctx.deps.sources]
-    if unsupported:
-        raise ModelRetry(
-            f"These recalls were not returned by a tool during this request: "
-            f"{', '.join(unsupported)}. Search again to retrieve them, or remove them and any "
-            "claims about them from the answer."
-        )
-    return output.model_copy(update={"cited_recall_ids": list(dict.fromkeys(cited))})
+    if feedback := grounding_feedback(output, ctx.deps.sources):
+        raise ModelRetry(feedback)
+    return with_unique_citations(output)
 
 
 @recall_agent.tool
@@ -134,13 +167,7 @@ async def search_vehicle_recalls(
         )
     except RecallSourceError as exc:
         return SourceUnavailable(agency="NHTSA", error=str(exc))
-    for recall in results.recalls:
-        ctx.deps.sources[recall.campaign_number] = Source(
-            id=recall.campaign_number,
-            agency="NHTSA",
-            title=f"{recall.model_year} {recall.make} {recall.model}: {recall.component}",
-            url=recall.url,
-        )
+    record_vehicle_sources(results, ctx.deps.sources)
     return results
 
 
@@ -171,9 +198,5 @@ async def search_product_recalls(
         )
     except RecallSourceError as exc:
         return SourceUnavailable(agency="CPSC", error=str(exc))
-    for recall in results.recalls:
-        if recall.recall_number and recall.url:
-            ctx.deps.sources[recall.recall_number] = Source(
-                id=recall.recall_number, agency="CPSC", title=recall.title, url=recall.url
-            )
+    record_product_sources(results, ctx.deps.sources)
     return results

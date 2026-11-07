@@ -11,6 +11,7 @@ FastAPI service for the Consumer Product & Vehicle Safety Assistant.
 
 | Variable                                          | Default                                         | Purpose                                                                                  |
 | ------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `AGENT_BACKEND`                                   | `pydantic_ai`                                   | Agent framework: `pydantic_ai` or `langchain` (see below)                                |
 | `GEMINI_API_KEY`                                  | unset                                           | Required for `/api/chat`                                                                 |
 | `GEMINI_MODEL`                                    | `gemini-3.8-flash`                              | Gemini model used by the agent                                                           |
 | `GEMINI_FALLBACK_MODELS`                          | `["gemini-3.6-flash", "gemini-3.5-flash-lite"]` | JSON list tried in order when the primary model is overloaded or failing (`[]` disables) |
@@ -19,4 +20,13 @@ FastAPI service for the Consumer Product & Vehicle Safety Assistant.
 | `RECALL_API_TIMEOUT_SECONDS`                      | `15`                                            | Timeout for recall API requests                                                          |
 | `MAX_PRODUCT_RECALL_RESULTS`                      | `10`                                            | CPSC results passed to the model                                                         |
 
-Tests use mocked HTTP transports and Pydantic AI `FunctionModel`, so they need no network access or API key.
+## Agent backends
+
+The chat agent has two interchangeable implementations with the same instructions, tools, output schema, grounding check, model fallback, and usage limits:
+
+- `pydantic_ai` (default): `src/chat/agent.py`, built on Pydantic AI.
+- `langchain`: `src/chat/langchain_agent.py`, built on LangChain `create_agent` with `langchain-google-genai`. Fallback models, usage limits, tool retry feedback, and the grounding check are agent middleware.
+
+Shared prompts, schemas, and grounding helpers live in `src/chat/agent.py`.
+
+Tests use mocked HTTP transports with Pydantic AI `FunctionModel` (`tests/test_chat.py`) or a scripted LangChain chat model (`tests/test_chat_langchain.py`), so they need no network access or API key.

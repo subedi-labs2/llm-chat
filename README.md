@@ -1,6 +1,6 @@
 # Consumer Product & Vehicle Safety Assistant
 
-A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with a Google Gemini model (via [Pydantic AI](https://ai.pydantic.dev/)) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
+A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with a Google Gemini model (via [Pydantic AI](https://ai.pydantic.dev/) by default, or [LangChain](https://docs.langchain.com/oss/python/langchain/overview) with `AGENT_BACKEND=langchain`) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
 
 ## How answers stay grounded
 
@@ -11,7 +11,7 @@ A public-facing assistant that helps people research product and vehicle safety.
 
 ## Structure
 
-- `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agent and `/api/chat` endpoint)
+- `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agents and `/api/chat` endpoint)
 - `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
 - `charts/` — Helm charts for the API and web, released independently
 - `infra/` — local k3d cluster config, per-environment chart values, and the Cloudflare Tunnel connector

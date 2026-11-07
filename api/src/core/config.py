@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     app_name: str = "Consumer Product & Vehicle Safety API"
     app_env: Literal["development", "test", "production"] = "development"
 
+    # Framework that runs the chat agent. Both use the same Gemini settings below.
+    agent_backend: Literal["pydantic_ai", "langchain"] = "pydantic_ai"
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.8-flash"
     # Tried in order when the primary model is overloaded, rate limited, or failing.

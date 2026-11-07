@@ -1,0 +1,315 @@
+import json
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
+
+import httpx
+import pytest
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.chat_models import GoogleRateLimitError
+from pydantic import SecretStr
+
+from src.chat.langchain_agent import LangChainChatModel
+from src.chat.router import get_chat_model
+from src.core.config import Settings, get_settings
+from src.main import app
+from tests.test_chat import post_chat, use_recall_api, user
+from tests.test_recall_client import NHTSA_RECALL, cpsc_recall
+
+Script = Callable[[list[BaseMessage]], AIMessage]
+
+
+class ScriptedChatModel(BaseChatModel):
+    """Replies with whatever the script returns, like Pydantic AI's FunctionModel."""
+
+    script: Script
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "ScriptedChatModel":
+        return self
+
+    def _generate(self, messages: list[BaseMessage], *_: Any, **__: Any) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self.script(messages))])
+
+
+def call(name: str, args: dict[str, Any]) -> AIMessage:
+    return AIMessage("", tool_calls=[{"name": name, "args": args, "id": f"call-{name}"}])
+
+
+def answer(text: str, cited: list[str] | None = None) -> AIMessage:
+    return call("ChatAnswer", {"answer": text, "cited_recall_ids": cited or []})
+
+
+def tool_messages(messages: list[BaseMessage], name: str) -> list[ToolMessage]:
+    return [m for m in messages if isinstance(m, ToolMessage) and m.name == name]
+
+
+def use_model(script: Script, *fallbacks: Script) -> None:
+    model = LangChainChatModel(
+        primary=ScriptedChatModel(script=script),
+        fallbacks=[ScriptedChatModel(script=fallback) for fallback in fallbacks],
+    )
+    app.dependency_overrides[get_chat_model] = lambda: model
+
+
+@pytest.fixture(autouse=True)
+def clear_overrides() -> Iterator[None]:
+    yield
+    app.dependency_overrides.clear()
+
+
+def test_builds_langchain_gemini_models_without_duplicates() -> None:
+    model = get_chat_model(
+        Settings(
+            agent_backend="langchain",
+            gemini_api_key=SecretStr("test-key"),
+            gemini_model="gemini-a",
+            gemini_fallback_models=["gemini-b", "gemini-a", "gemini-c"],
+            gemini_retry_attempts=3,
+        )
+    )
+
+    assert isinstance(model, LangChainChatModel)
+    models = [model.primary, *model.fallbacks]
+    assert all(isinstance(m, ChatGoogleGenerativeAI) for m in models)
+    assert [m.model for m in models] == ["gemini-a", "gemini-b", "gemini-c"]
+    assert model.primary.max_retries == 3
+
+
+def test_returns_503_when_gemini_key_missing() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(agent_backend="langchain")
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 503
+
+
+def accord_search(*answers: AIMessage, feedback: list[str] | None = None) -> Script:
+    """Search NHTSA once, then reply with each answer in turn."""
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if not tool_messages(messages, "search_vehicle_recalls"):
+            return call(
+                "search_vehicle_recalls", {"make": "Honda", "model": "Accord", "model_year": 2018}
+            )
+        retries = [str(m.content) for m in tool_messages(messages, "ChatAnswer")]
+        if feedback is not None:
+            feedback[:] = retries
+        return answers[min(len(retries), len(answers) - 1)]
+
+    return script
+
+
+def test_answers_from_tool_results_with_retrieved_sources() -> None:
+    seen: list[list[BaseMessage]] = []
+    search = accord_search(answer("Recall 18V268000: park outside.", ["18V268000"]))
+    use_model(lambda messages: seen.append(messages) or search(messages))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+
+    response = post_chat(
+        {
+            "messages": [
+                user("Is my car recalled?"),
+                {"role": "assistant", "content": "What year, make, and model?"},
+                user("2018 Honda Accord"),
+            ]
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "Recall 18V268000: park outside.",
+        "sources": [
+            {
+                "id": "18V268000",
+                "agency": "NHTSA",
+                "title": "2018 HONDA ACCORD: ELECTRICAL SYSTEM",
+                "url": "https://www.nhtsa.gov/recalls?nhtsaId=18V268000",
+            }
+        ],
+    }
+    history = [(type(m), m.content) for m in seen[0][1:]]
+    assert history == [
+        (HumanMessage, "Is my car recalled?"),
+        (AIMessage, "What year, make, and model?"),
+        (HumanMessage, "2018 Honda Accord"),
+    ]
+    results = json.loads(str(tool_messages(seen[1], "search_vehicle_recalls")[0].content))
+    assert results["total_found"] == 1
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        answer("Recall 18V268000 and 99V999000 apply.", ["18V268000", "99V999000"]),
+        answer("Recall 18V268000 applies. Recall 99V-999 too.", ["18V268000"]),
+    ],
+    ids=["cited", "mentioned-only"],
+)
+def test_makes_model_correct_unretrieved_recalls(unsupported: AIMessage) -> None:
+    feedback: list[str] = []
+    corrected = answer("Recall 18V268000 applies.", ["18V268000", " 18V268000"])
+    use_model(accord_search(unsupported, corrected, feedback=feedback))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Recall 18V268000 applies."
+    assert [source["id"] for source in response.json()["sources"]] == ["18V268000"]
+    assert len(feedback) == 1
+    assert "99V999000" in feedback[0]
+
+
+def test_never_publishes_persistently_unsupported_recalls() -> None:
+    feedback: list[str] = []
+    unsupported = answer("Recall 99V999000 means you should stop driving.", ["99V999000"])
+    use_model(accord_search(unsupported, feedback=feedback))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": [NHTSA_RECALL]}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 502
+    assert "99V999000" not in response.text
+    assert len(feedback) == 2
+
+
+def test_reports_unavailable_source_to_model() -> None:
+    seen: list[str] = []
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_messages(messages, "search_vehicle_recalls"):
+            seen.append(str(results[0].content))
+            return answer("I couldn't reach NHTSA right now.")
+        return accord_search()(messages)
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(503, text="down"))
+
+    response = post_chat({"messages": [user("Recalls for 2018 Honda Accord?")]})
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": "I couldn't reach NHTSA right now.", "sources": []}
+    assert json.loads(seen[0])["agency"] == "NHTSA"
+
+
+def test_rejects_invalid_vin_before_calling_nhtsa() -> None:
+    calls: list[httpx.Request] = []
+    feedback: list[str] = []
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_messages(messages, "decode_vin"):
+            feedback.append(str(results[0].content))
+            return answer("That VIN looks invalid. Please re-check it.")
+        return call("decode_vin", {"vin": "OOPS"})
+
+    use_model(script)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json={}))
+
+    response = post_chat({"messages": [user("My VIN is OOPS")]})
+
+    assert response.status_code == 200
+    assert calls == []
+    assert "17 letters" in feedback[0]
+
+
+def test_answers_from_cpsc_search_with_verified_sources() -> None:
+    requests: list[httpx.Request] = []
+    feedback: list[str] = []
+    no_url = cpsc_recall("25002", "2025-02-01") | {"URL": None}
+
+    def cpsc(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[cpsc_recall("25001", "2025-03-01"), no_url])
+
+    answers = [
+        answer("Recalls 25001 and 25002 cover Acme strollers.", ["25001", "25002"]),
+        answer("Recall 25001: the frame can break.", ["25001"]),
+    ]
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if not tool_messages(messages, "search_product_recalls"):
+            args = {"product_name": "stroller", "manufacturer": "Acme"}
+            return call("search_product_recalls", args)
+        feedback[:] = [str(m.content) for m in tool_messages(messages, "ChatAnswer")]
+        return answers[min(len(feedback), 1)]
+
+    use_model(script)
+    use_recall_api(cpsc)
+
+    response = post_chat({"messages": [user("Any recalls on Acme strollers?")]})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "Recall 25001: the frame can break.",
+        "sources": [
+            {
+                "id": "25001",
+                "agency": "CPSC",
+                "title": "Stroller recall 25001",
+                "url": "https://www.cpsc.gov/Recalls/25001",
+            }
+        ],
+    }
+    assert requests[0].url.params["ProductName"] == "stroller"
+    assert requests[0].url.params["Manufacturer"] == "Acme"
+    assert len(feedback) == 1
+    assert "25002" in feedback[0]
+
+
+def test_requires_cpsc_search_terms_before_calling_cpsc() -> None:
+    calls: list[httpx.Request] = []
+    feedback: list[str] = []
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if results := tool_messages(messages, "search_product_recalls"):
+            feedback.append(str(results[0].content))
+            return answer("Which product or brand should I check?")
+        return call("search_product_recalls", {"recall_date_start": "2025-01-01"})
+
+    use_model(script)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json=[]))
+
+    response = post_chat({"messages": [user("Any product recalls this year?")]})
+
+    assert response.status_code == 200
+    assert calls == []
+    assert "product_name, manufacturer, or recall_number" in feedback[0]
+
+
+def overloaded(_: list[BaseMessage]) -> AIMessage:
+    raise GoogleRateLimitError("Error calling model 'gemini-a' (RESOURCE_EXHAUSTED)")
+
+
+def test_falls_back_when_primary_model_fails() -> None:
+    use_model(overloaded, lambda _: answer("Answered by the backup model."))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Answered by the backup model."
+
+
+def test_returns_502_when_all_models_fail() -> None:
+    use_model(overloaded, overloaded)
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 502
+
+
+def test_returns_502_when_tool_call_limit_is_exceeded() -> None:
+    use_model(accord_search(call("decode_vin", {"vin": "1HGCV1F30JA000000"})))
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+    response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
+
+    assert response.status_code == 502
