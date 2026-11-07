@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.config import AgentBackend
 from src.recalls.schemas import Agency
 
 
@@ -12,6 +13,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+    # Ignored unless ALLOW_BACKEND_SELECTION is enabled.
+    backend: AgentBackend | None = None
 
     @field_validator("messages")
     @classmethod
@@ -31,3 +34,9 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
+    backend: AgentBackend
+
+
+class ChatConfig(BaseModel):
+    default_backend: AgentBackend
+    backend_selection: bool

@@ -1,18 +1,21 @@
 import json
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 import pytest
+from fastapi import Depends
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import GoogleRateLimitError
 from pydantic import SecretStr
+from pydantic_ai import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from src.chat.langchain_agent import LangChainChatModel
-from src.chat.router import get_chat_model
+from src.chat.router import ChatModel, get_agent_backend, get_chat_model
 from src.core.config import Settings, get_settings
 from src.main import app
 from tests.test_chat import post_chat, use_recall_api, user
@@ -133,6 +136,7 @@ def test_answers_from_tool_results_with_retrieved_sources() -> None:
                 "url": "https://www.nhtsa.gov/recalls?nhtsaId=18V268000",
             }
         ],
+        "backend": "langchain",
     }
     history = [(type(m), m.content) for m in seen[0][1:]]
     assert history == [
@@ -195,7 +199,11 @@ def test_reports_unavailable_source_to_model() -> None:
     response = post_chat({"messages": [user("Recalls for 2018 Honda Accord?")]})
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "I couldn't reach NHTSA right now.", "sources": []}
+    assert response.json() == {
+        "answer": "I couldn't reach NHTSA right now.",
+        "sources": [],
+        "backend": "langchain",
+    }
     assert json.loads(seen[0])["agency"] == "NHTSA"
 
 
@@ -256,6 +264,7 @@ def test_answers_from_cpsc_search_with_verified_sources() -> None:
                 "url": "https://www.cpsc.gov/Recalls/25001",
             }
         ],
+        "backend": "langchain",
     }
     assert requests[0].url.params["ProductName"] == "stroller"
     assert requests[0].url.params["Manufacturer"] == "Acme"
@@ -313,3 +322,49 @@ def test_returns_502_when_tool_call_limit_is_exceeded() -> None:
     response = post_chat({"messages": [user("Any recalls on a 2018 Honda Accord?")]})
 
     assert response.status_code == 502
+
+
+def use_model_per_backend() -> None:
+    """Answer with a scripted model for whichever backend the request resolves to."""
+
+    def pydantic_ai(_: Any, info: AgentInfo) -> ModelResponse:
+        output = {"answer": "Answered by pydantic_ai.", "cited_recall_ids": []}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, output)])
+
+    def model(backend: Annotated[str, Depends(get_agent_backend)]) -> ChatModel:
+        if backend == "langchain":
+            return LangChainChatModel(
+                primary=ScriptedChatModel(script=lambda _: answer("Answered by langchain."))
+            )
+        return FunctionModel(pydantic_ai)
+
+    app.dependency_overrides[get_chat_model] = model
+    use_recall_api(lambda _: httpx.Response(200, json={"results": []}))
+
+
+@pytest.mark.parametrize(
+    ("allow", "requested", "expected"),
+    [
+        (True, "langchain", "langchain"),
+        (True, "pydantic_ai", "pydantic_ai"),
+        (True, None, "pydantic_ai"),
+        (False, "langchain", "pydantic_ai"),
+    ],
+)
+def test_chat_runs_requested_backend_only_when_selection_allowed(
+    allow: bool, requested: str | None, expected: str
+) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(allow_backend_selection=allow)
+    use_model_per_backend()
+
+    response = post_chat({"messages": [user("hi")], "backend": requested})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == f"Answered by {expected}."
+    assert response.json()["backend"] == expected
+
+
+def test_chat_rejects_unknown_backend() -> None:
+    use_model_per_backend()
+
+    assert post_chat({"messages": [user("hi")], "backend": "other"}).status_code == 422

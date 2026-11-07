@@ -4,13 +4,17 @@ from typing import Literal
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+AgentBackend = Literal["pydantic_ai", "langchain"]
+
 
 class Settings(BaseSettings):
     app_name: str = "Consumer Product & Vehicle Safety API"
     app_env: Literal["development", "test", "production"] = "development"
 
     # Framework that runs the chat agent. Both use the same Gemini settings below.
-    agent_backend: Literal["pydantic_ai", "langchain"] = "pydantic_ai"
+    agent_backend: AgentBackend = "pydantic_ai"
+    # Let chat requests choose the agent backend (shown as a toggle in the web app).
+    allow_backend_selection: bool = False
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.8-flash"
     # Tried in order when the primary model is overloaded, rate limited, or failing.

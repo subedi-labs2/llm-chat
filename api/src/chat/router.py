@@ -27,8 +27,8 @@ from src.chat.langchain_agent import (
     gemini_chat_model,
     run_langchain_agent,
 )
-from src.chat.schemas import ChatMessage, ChatRequest, ChatResponse
-from src.core.config import Settings, get_settings
+from src.chat.schemas import ChatConfig, ChatMessage, ChatRequest, ChatResponse
+from src.core.config import AgentBackend, Settings, get_settings
 from src.recalls.client import RecallClient
 
 logger = logging.getLogger(__name__)
@@ -39,12 +39,23 @@ router = APIRouter(tags=["chat"])
 ChatModel = Model | LangChainChatModel
 
 
-def get_chat_model(settings: Annotated[Settings, Depends(get_settings)]) -> ChatModel:
+def get_agent_backend(
+    body: ChatRequest, settings: Annotated[Settings, Depends(get_settings)]
+) -> AgentBackend:
+    if body.backend and settings.allow_backend_selection:
+        return body.backend
+    return settings.agent_backend
+
+
+def get_chat_model(
+    settings: Annotated[Settings, Depends(get_settings)],
+    backend: Annotated[AgentBackend | None, Depends(get_agent_backend)] = None,
+) -> ChatModel:
     api_key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else ""
     if not api_key:
         raise HTTPException(status_code=503, detail="Chat is not configured")
     names = dict.fromkeys([settings.gemini_model, *settings.gemini_fallback_models])
-    if settings.agent_backend == "langchain":
+    if (backend or settings.agent_backend) == "langchain":
         return gemini_chat_model(list(names), api_key, settings.gemini_retry_attempts)
     retry = HttpRetryOptions(
         attempts=max(settings.gemini_retry_attempts, 1), initial_delay=1.0, max_delay=4.0
@@ -84,12 +95,21 @@ async def run_pydantic_ai_agent(
     return result.output
 
 
+@router.get("/chat/config", response_model=ChatConfig)
+async def chat_config(settings: Annotated[Settings, Depends(get_settings)]) -> ChatConfig:
+    return ChatConfig(
+        default_backend=settings.agent_backend,
+        backend_selection=settings.allow_backend_selection,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
     model: Annotated[ChatModel, Depends(get_chat_model)],
     recalls: Annotated[RecallClient, Depends(get_recall_client)],
 ) -> ChatResponse:
+    backend: AgentBackend = "langchain" if isinstance(model, LangChainChatModel) else "pydantic_ai"
     try:
         if isinstance(model, LangChainChatModel):
             deps: ChatDeps = LangChainDeps(recalls=recalls)
@@ -103,4 +123,4 @@ async def chat(
 
     # Both agents' grounding checks guarantee every cited recall was retrieved during this run.
     sources = [deps.sources[recall_id] for recall_id in output.cited_recall_ids]
-    return ChatResponse(answer=output.answer, sources=sources)
+    return ChatResponse(answer=output.answer, sources=sources, backend=backend)

@@ -1,35 +1,43 @@
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 
+import { BackendToggle } from "@/components/backend-toggle";
 import { Chat } from "@/components/chat";
+import { useAgentBackend } from "@/hooks/use-agent-backend";
 import { useApiStatus } from "@/hooks/use-api-status";
 
 function App() {
   const apiStatus = useApiStatus();
+  const { backend, setBackend } = useAgentBackend(apiStatus === "connected");
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-950">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-5">
+        <div className="mx-auto flex min-h-16 max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3 sm:py-0">
           <div className="flex items-center gap-3 font-semibold tracking-tight">
             <span className="grid size-9 place-items-center rounded-xl bg-teal-700 text-white">
               <ShieldCheck className="size-5" aria-hidden="true" />
             </span>
             Safety Assistant
           </div>
-          <div
-            className="flex items-center gap-2 text-xs font-medium text-slate-500"
-            aria-live="polite"
-          >
-            <span
-              className={`size-2 rounded-full ${
-                apiStatus === "connected"
-                  ? "bg-emerald-500"
-                  : apiStatus === "unavailable"
-                    ? "bg-rose-500"
-                    : "animate-pulse bg-amber-400"
-              }`}
-            />
-            API {apiStatus}
+          <div className="flex items-center gap-4 whitespace-nowrap">
+            {backend !== null && (
+              <BackendToggle value={backend} onChange={setBackend} />
+            )}
+            <div
+              className="flex items-center gap-2 text-xs font-medium text-slate-500"
+              aria-live="polite"
+            >
+              <span
+                className={`size-2 rounded-full ${
+                  apiStatus === "connected"
+                    ? "bg-emerald-500"
+                    : apiStatus === "unavailable"
+                      ? "bg-rose-500"
+                      : "animate-pulse bg-amber-400"
+                }`}
+              />
+              API {apiStatus}
+            </div>
           </div>
         </div>
       </header>
@@ -52,7 +60,7 @@ function App() {
           </p>
         </section>
 
-        <Chat />
+        <Chat backend={backend} />
 
         <p className="mt-6 text-center text-xs leading-5 text-slate-600">
           Always confirm critical recall information with the manufacturer or
