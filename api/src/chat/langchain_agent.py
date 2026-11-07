@@ -237,4 +237,7 @@ async def run_langchain_agent(
         ],
     )
     state = await agent.ainvoke({"messages": to_langchain_messages(messages)}, context=deps)
-    return state["structured_response"]
+    output = state.get("structured_response")
+    if not isinstance(output, ChatAnswer):
+        raise LangChainException("The model did not return a structured answer")
+    return output
