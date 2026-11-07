@@ -19,7 +19,6 @@ from langchain.agents.middleware import (
     ModelResponse,
     ToolCallLimitMiddleware,
     ToolCallRequest,
-    ToolErrorMiddleware,
 )
 from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
 from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
@@ -31,10 +30,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langgraph.errors import GraphRecursionError
+from langgraph.types import Command
 from pydantic import SecretStr
 
 from src.chat.agent import (
     INSTRUCTIONS,
+    MAX_RETRIES,
     USAGE_LIMITS,
     VIN_PATTERN,
     ChatAnswer,
@@ -48,9 +49,6 @@ from src.chat.schemas import ChatMessage
 from src.recalls.client import RecallSourceError
 from src.recalls.schemas import SourceUnavailable
 
-# Matches the Pydantic AI agent's retries=2 for output validation.
-MAX_OUTPUT_RETRIES = 2
-
 
 @dataclass
 class LangChainChatModel:
@@ -63,10 +61,17 @@ class LangChainChatModel:
 @dataclass
 class LangChainDeps(ChatDeps):
     output_retries: int = 0
+    # Consecutive failed steps per tool, and the graph step of each tool's latest failure.
+    tool_retries: dict[str, int] = field(default_factory=dict)
+    tool_failure_steps: dict[str, int] = field(default_factory=dict)
 
 
 class ToolRetry(Exception):
     """Raised by a tool to send correction feedback to the model, like Pydantic AI's ModelRetry."""
+
+
+class ToolRetriesExceededError(Exception):
+    """A tool kept failing after MAX_RETRIES retries."""
 
 
 class UngroundedAnswerError(Exception):
@@ -82,6 +87,7 @@ LANGCHAIN_RUN_ERRORS: tuple[type[Exception], ...] = (
     ModelCallLimitExceededError,
     StructuredOutputError,
     ToolCallLimitExceededError,
+    ToolRetriesExceededError,
     UngroundedAnswerError,
 )
 
@@ -181,9 +187,42 @@ async def search_product_recalls(
 TOOLS = [decode_vin, search_vehicle_recalls, search_product_recalls]
 
 
-def tool_retry_feedback(exc: Exception, _: ToolCallRequest) -> str | None:
-    # Returning None lets every other exception propagate instead of reaching the model.
-    return str(exc) if isinstance(exc, ToolRetry) else None
+class LimitToolRetries(AgentMiddleware[Any, LangChainDeps]):
+    """Return tool errors to the model, but fail the run once a tool exhausts its retries.
+
+    Mirrors Pydantic AI's per-tool retry budget: ToolRetry and invalid-argument errors are
+    sent back to the model, each tool may fail on MAX_RETRIES consecutive steps (failures in
+    the same step count once), and a successful call resets that tool's count.
+    """
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        deps: LangChainDeps = request.runtime.context
+        name = request.tool_call["name"]
+        step = request.runtime.config.get("metadata", {}).get("langgraph_step")
+        try:
+            result = await handler(request)
+        except ToolRetry as exc:
+            result = ToolMessage(
+                str(exc), tool_call_id=request.tool_call["id"], name=name, status="error"
+            )
+        failed = isinstance(result, ToolMessage) and result.status == "error"
+        if not failed:
+            if deps.tool_failure_steps.get(name) != step:
+                deps.tool_retries.pop(name, None)
+            return result
+        if deps.tool_failure_steps.get(name) != step:
+            retries = deps.tool_retries.get(name, 0)
+            if retries >= MAX_RETRIES:
+                raise ToolRetriesExceededError(
+                    f"Tool {name!r} exceeded max retries count of {MAX_RETRIES}"
+                )
+            deps.tool_retries[name] = retries + 1
+            deps.tool_failure_steps[name] = step
+        return result
 
 
 class RequireRetrievedRecalls(AgentMiddleware[Any, LangChainDeps]):
@@ -208,7 +247,7 @@ class RequireRetrievedRecalls(AgentMiddleware[Any, LangChainDeps]):
             return ModelResponse(
                 result=response.result, structured_response=with_unique_citations(output)
             )
-        if deps.output_retries >= MAX_OUTPUT_RETRIES:
+        if deps.output_retries >= MAX_RETRIES:
             raise UngroundedAnswerError(feedback)
         deps.output_retries += 1
         message = next(m for m in response.result if isinstance(m, AIMessage))
@@ -231,7 +270,7 @@ async def run_langchain_agent(
         middleware=[
             RequireRetrievedRecalls(),
             *fallback,
-            ToolErrorMiddleware(on_error=tool_retry_feedback),
+            LimitToolRetries(),
             ModelCallLimitMiddleware(run_limit=USAGE_LIMITS.request_limit, exit_behavior="error"),
             ToolCallLimitMiddleware(run_limit=USAGE_LIMITS.tool_calls_limit, exit_behavior="error"),
         ],

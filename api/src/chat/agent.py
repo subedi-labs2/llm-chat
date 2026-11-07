@@ -17,6 +17,8 @@ from src.recalls.schemas import (
 
 pydantic_ai.BANNER_ENABLED = False
 
+# Retries allowed per tool and for output validation, shared by both agent backends.
+MAX_RETRIES = 2
 # Per-request budget shared by both agent backends.
 USAGE_LIMITS = UsageLimits(request_limit=8, tool_calls_limit=6)
 
@@ -77,7 +79,7 @@ recall_agent = Agent(
     deps_type=ChatDeps,
     output_type=ChatAnswer,
     instructions=lambda _: INSTRUCTIONS.format(today=date.today().isoformat()),
-    retries=2,
+    retries=MAX_RETRIES,
 )
 
 

@@ -248,6 +248,25 @@ def test_chat_rejects_invalid_vin_before_calling_nhtsa() -> None:
     assert any("17 letters" in text for text in feedback)
 
 
+def test_chat_returns_502_when_tool_exceeds_retries() -> None:
+    model_calls: list[list[ModelMessage]] = []
+    calls: list[httpx.Request] = []
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        model_calls.append(messages)
+        return ModelResponse(parts=[ToolCallPart("decode_vin", {"vin": "OOPS"})])
+
+    app.dependency_overrides[get_chat_model] = lambda: FunctionModel(model)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json={}))
+
+    response = post_chat({"messages": [user("My VIN is OOPS")]})
+
+    # retries=2: two failures are fed back to the model, the third fails the run.
+    assert response.status_code == 502
+    assert len(model_calls) == 3
+    assert calls == []
+
+
 def retry_feedback(messages: list[ModelMessage]) -> list[str]:
     # Output validation feedback may arrive as a RetryPromptPart or as a ToolReturnPart for
     # the output tool, depending on the pydantic-ai version.

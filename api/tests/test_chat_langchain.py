@@ -227,6 +227,60 @@ def test_rejects_invalid_vin_before_calling_nhtsa() -> None:
     assert "17 letters" in feedback[0]
 
 
+@pytest.mark.parametrize("args", [{"vin": "OOPS"}, {"vin": 123}], ids=["tool_retry", "bad_args"])
+def test_returns_502_when_tool_exceeds_retries(args: dict[str, Any]) -> None:
+    calls: list[httpx.Request] = []
+    feedback: list[str] = []
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        feedback[:] = [str(m.content) for m in tool_messages(messages, "decode_vin")]
+        return call("decode_vin", args)
+
+    use_model(script)
+    use_recall_api(lambda request: calls.append(request) or httpx.Response(200, json={}))
+
+    response = post_chat({"messages": [user("My VIN is OOPS")]})
+
+    # Like Pydantic AI's retries=2: two failures are fed back, the third fails the run.
+    assert response.status_code == 502
+    assert len(feedback) == 2
+    assert calls == []
+
+
+def test_successful_tool_call_resets_retries() -> None:
+    bad = {"recall_date_start": "2025-01-01"}
+    steps = [bad, {"product_name": "stroller"}, bad, bad]
+
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        step = len(tool_messages(messages, "search_product_recalls"))
+        if step == len(steps):
+            return answer("Which stroller brand should I check?")
+        return call("search_product_recalls", steps[step])
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(200, json=[]))
+
+    response = post_chat({"messages": [user("Any stroller recalls?")]})
+
+    assert response.status_code == 200
+
+
+def test_counts_failures_in_one_step_as_one_retry() -> None:
+    def script(messages: list[BaseMessage]) -> AIMessage:
+        if tool_messages(messages, "decode_vin"):
+            return answer("Those VINs look invalid. Please re-check them.")
+        message = call("decode_vin", {"vin": "OOPS"})
+        message.tool_calls = [{**message.tool_calls[0], "id": f"vin-{i}"} for i in range(3)]
+        return message
+
+    use_model(script)
+    use_recall_api(lambda _: httpx.Response(200, json={}))
+
+    response = post_chat({"messages": [user("My VINs are OOPS, OOPS, and OOPS")]})
+
+    assert response.status_code == 200
+
+
 def test_answers_from_cpsc_search_with_verified_sources() -> None:
     requests: list[httpx.Request] = []
     feedback: list[str] = []
