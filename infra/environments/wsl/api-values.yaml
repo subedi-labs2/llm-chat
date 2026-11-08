@@ -1,2 +1,16 @@
 gemini:
   existingSecret: llm-chat-api
+
+# Non-secret settings (see api/README.md). GEMINI_API_KEY comes from the Secret above.
+extraEnv:
+  - name: AGENT_BACKEND
+    value: pydantic_ai
+  # Keep off: the app has no login, so any visitor could switch backends.
+  - name: ALLOW_BACKEND_SELECTION
+    value: "false"
+  - name: GEMINI_MODEL
+    value: gemini-3.8-flash
+  - name: GEMINI_FALLBACK_MODELS
+    value: '["gemini-3.6-flash","gemini-3.5-flash-lite"]'
+  - name: GEMINI_RETRY_ATTEMPTS
+    value: "2"

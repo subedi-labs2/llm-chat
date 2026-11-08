@@ -106,7 +106,7 @@ helm upgrade --install web oci://ghcr.io/subedi-labs2/charts/llm-chat-web \
   -n llm-chat -f infra/environments/wsl/web-values.yaml --wait
 ```
 
-Open http://localhost:8080. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api` or `charts/web` instead of the `oci://` reference.
+Open http://localhost:8080. The Secret holds only `GEMINI_API_KEY`; other API settings (model, fallbacks, backend) are set through `extraEnv` in `infra/environments/wsl/api-values.yaml`. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api` or `charts/web` instead of the `oci://` reference.
 
 ### Public access (Cloudflare Tunnel)
 
