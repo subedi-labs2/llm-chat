@@ -14,7 +14,7 @@ export function VersionInfo({ api }: { api: HealthResponse | null }) {
   }
 
   return (
-    <footer className="pb-6 text-center text-xs text-slate-400">
+    <footer className="pb-6 text-center text-xs text-slate-500">
       {parts.map(({ name, version, commit }, index) => (
         <span key={name}>
           {index > 0 && <span aria-hidden="true"> · </span>}
