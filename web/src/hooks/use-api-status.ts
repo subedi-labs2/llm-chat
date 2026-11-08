@@ -36,7 +36,8 @@ export function useApiStatus(): ApiState {
             setStatus("connected");
             // Keep the same object while unchanged so polling doesn't re-render.
             setHealth((previous) =>
-              previous?.version === response.version &&
+              previous !== null &&
+              previous.version === response.version &&
               previous.commit === response.commit
                 ? previous
                 : response,
