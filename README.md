@@ -73,12 +73,12 @@ Use `uv run ruff format .` and `npm run format` to format code. GitHub Actions r
 
 ## Container images
 
-Every push to `main` publishes production images to GitHub Container Registry for whichever of `api/` or `web/` changed (run the **Release Images** workflow manually to publish both):
+Every push to `main` publishes production images to GitHub Container Registry for whichever of `api/` or `web/` changed (run the **Release** workflow manually to publish both):
 
 - `ghcr.io/subedi-labs2/llm-chat-api` — FastAPI on port 8000; configure it with the same environment variables as `api/.env.example`.
 - `ghcr.io/subedi-labs2/llm-chat-web` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`). The API address is looked up per request, so web starts before the API exists. In Kubernetes, set `API_UPSTREAM` to the Service's fully qualified name, such as `http://api.<namespace>.svc.cluster.local:8000`.
 
-Each image is tagged `latest` and `sha-<full commit SHA>`. Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
+Each image is tagged `latest` and `sha-<full commit SHA>`; released images are also tagged with their version (`X.Y.Z` and `X.Y`). Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
 
 ## Kubernetes (Helm)
 
@@ -133,12 +133,18 @@ Troubleshooting: `kubectl -n llm-chat logs -l app=cloudflared`. `Provided Tunnel
 
 ### Releases
 
-1. A push to `main` that changes `api/` or `web/` publishes a new image. The **Release Images** workflow then opens a PR that pins that image's digest in the chart and bumps the chart's patch version.
-2. CI lints and validates the charts, requires a version bump for any chart change, and installs both charts into a kind cluster.
-3. Merging a chart change runs **Release Charts**, which publishes any chart version not already in GHCR.
+The API and web are versioned independently with [release-please](https://github.com/googleapis/release-please), using [Conventional Commits](https://www.conventionalcommits.org). PRs are squash-merged with the PR title as the commit message, so CI requires conventional PR titles (`feat: …`, `fix(api): …`). While versions are below 1.0, `feat` bumps the minor version and `fix` the patch version.
 
-The chart PR is opened by a GitHub App so CI runs on it. One-time setup:
+1. On each push to `main`, the **Release** workflow opens or updates a release PR that bumps the versions in `api/pyproject.toml` (and `uv.lock`) and `web/package.json`, and updates each `CHANGELOG.md`. Changed components also get a `sha-<commit>` image for testing; these are not deployed.
+2. Merging the release PR tags each released component (`api-vX.Y.Z`, `web-vX.Y.Z`) and creates a GitHub Release. Each tag push runs **Release** again, which builds the tagged commit, publishes an image tagged `X.Y.Z`, and opens a PR that pins that image's digest in the chart and bumps the chart's patch version. If publishing fails, re-run that workflow run, or run **Release** manually and pick the tag.
+3. CI lints and validates the charts, requires a version bump for any chart change, and installs both charts into a kind cluster.
+4. Merging a chart change runs **Release Charts**, which publishes any chart version not already in GHCR.
+
+To see what is deployed, check the footer of the web app (hover for commits), `GET /api/health` (`version` and `commit`), or `helm list -n llm-chat` (the app version column). Builds that aren't releases report the last release plus the commit, such as `0.2.0+sha.abc1234`.
+
+The release PR and chart PRs are opened by a GitHub App so CI runs on them. One-time setup:
 
 1. Create a GitHub App owned by the organization, with webhooks disabled and repository permissions **Contents: Read and write** and **Pull requests: Read and write**. Install it on this repository only.
 2. In this repository's **Settings → Secrets and variables → Actions**, add the variable `RELEASE_BOT_CLIENT_ID` (the App's client ID) and the secret `RELEASE_BOT_PRIVATE_KEY` (a private key generated for the App).
+3. Optionally, require the **Conventional Title** check in the `main` branch protection rules.
 

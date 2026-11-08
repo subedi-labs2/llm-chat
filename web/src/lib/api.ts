@@ -1,5 +1,7 @@
 export interface HealthResponse {
   status: "ok";
+  version: string;
+  commit: string;
 }
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {

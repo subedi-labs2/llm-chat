@@ -1,14 +1,21 @@
 import { useEffect, useState } from "react";
 
-import { getHealth } from "@/lib/api";
+import { getHealth, type HealthResponse } from "@/lib/api";
 
 export type ApiStatus = "checking" | "connected" | "unavailable";
 
 const POLL_INTERVAL_MS = 3_000;
 const REQUEST_TIMEOUT_MS = 2_000;
 
-export function useApiStatus(): ApiStatus {
+export interface ApiState {
+  status: ApiStatus;
+  /** The latest health response, kept while the API is briefly unavailable. */
+  health: HealthResponse | null;
+}
+
+export function useApiStatus(): ApiState {
   const [status, setStatus] = useState<ApiStatus>("checking");
+  const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
     let controller: AbortController | undefined;
@@ -24,9 +31,17 @@ export function useApiStatus(): ApiStatus {
       timeoutId = window.setTimeout(() => current.abort(), REQUEST_TIMEOUT_MS);
 
       getHealth(current.signal)
-        .then(() => {
+        .then((response) => {
           if (controller === current) {
             setStatus("connected");
+            // Keep the same object while unchanged so polling doesn't re-render.
+            setHealth((previous) =>
+              previous !== null &&
+              previous.version === response.version &&
+              previous.commit === response.commit
+                ? previous
+                : response,
+            );
           }
         })
         .catch(() => {
@@ -82,5 +97,5 @@ export function useApiStatus(): ApiStatus {
     };
   }, []);
 
-  return status;
+  return { status, health };
 }

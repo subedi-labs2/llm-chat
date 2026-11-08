@@ -1,24 +1,55 @@
-
-name: Release Images
+name: Release
 
 on:
   push:
     branches: [main]
+    # Release tags are pushed by release-please (via the release bot App, so they trigger
+    # workflows). Publishing from the tag builds exactly the released commit, and a failed
+    # publish can be retried by re-running this workflow or dispatching it on the tag.
+    tags: ['api-v*', 'web-v*']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Opens or updates the release PR from conventional commits, and when that PR is merged,
+  # tags the release (api-vX.Y.Z / web-vX.Y.Z) and creates the GitHub Release. The tag push
+  # then runs this workflow again to publish the release.
+  release-please:
+    name: Release Please
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    steps:
+      # A GitHub App token so CI runs on the release PR and the release tags trigger this
+      # workflow (events from GITHUB_TOKEN don't trigger workflows).
+      - name: Create release bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.bot-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      components: ${{ github.event_name == 'workflow_dispatch' && '["api","web"]' || steps.filter.outputs.changes }}
+      components: ${{ steps.components.outputs.components }}
+      release: ${{ steps.components.outputs.release }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Detect changed directories
+        if: github.ref_type == 'branch'
         uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -29,6 +60,38 @@ jobs:
             web:
               - 'web/**'
               - '.github/workflows/release.yml'
+
+      # Release tags build only the tagged component. Branch pushes build changed
+      # components, and manual runs on a branch build all of them.
+      - name: Select components
+        id: components
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          release=""
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            component=${GITHUB_REF_NAME%%-v*}
+            release=${GITHUB_REF_NAME#*-v}
+            case "$component" in api|web) ;; *) echo "::error::Unknown component in tag $GITHUB_REF_NAME"; exit 1 ;; esac
+            if ! [[ "$release" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME is not <component>-vX.Y.Z"
+              exit 1
+            fi
+            manifest=$(jq -r --arg c "$component" '.[$c]' .release-please-manifest.json)
+            if [ "$manifest" != "$release" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match the manifest version ($manifest) at ${GITHUB_SHA::7}"
+              exit 1
+            fi
+            components=$(jq -cn --arg c "$component" '[$c]')
+          elif [ "$MANUAL" = true ]; then
+            components='["api","web"]'
+          else
+            components=$CHANGED
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+          echo "Components: $components, release: ${release:-none}"
 
   publish:
     name: Publish ${{ matrix.component }}
@@ -53,6 +116,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Release tags build as X.Y.Z; other builds report the last release plus the commit.
+      - name: Determine version
+        id: version
+        env:
+          COMPONENT: ${{ matrix.component }}
+          RELEASE: ${{ needs.changes.outputs.release }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            version=$RELEASE
+          else
+            version="$(jq -r --arg c "$COMPONENT" '.[$c]' .release-please-manifest.json)+sha.${GITHUB_SHA::7}"
+          fi
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -73,6 +152,8 @@ jobs:
           tags: |
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.release }},enable=${{ steps.version.outputs.release != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.release }},enable=${{ steps.version.outputs.release != '' }}
 
       - name: Build and push
         id: build
@@ -83,6 +164,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+            APP_COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
@@ -117,10 +201,10 @@ jobs:
             echo "- Digest: \`$DIGEST\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Pin the new image in the component's chart via a PR. Uses a GitHub App token
+      # Pin released images in the component's chart via a PR. Uses a GitHub App token
       # so CI runs on the PR (events from GITHUB_TOKEN don't trigger workflows).
       - name: Create release bot token
-        if: github.ref == 'refs/heads/main'
+        if: steps.version.outputs.release != ''
         id: bot-token
         uses: actions/create-github-app-token@v3
         with:
@@ -128,7 +212,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
 
       - name: Check out main for chart update
-        if: github.ref == 'refs/heads/main'
+        if: steps.version.outputs.release != ''
         uses: actions/checkout@v6
         with:
           ref: main
@@ -136,10 +220,10 @@ jobs:
           token: ${{ steps.bot-token.outputs.token }}
 
       - name: Pin image in chart
-        if: github.ref == 'refs/heads/main'
+        if: steps.version.outputs.release != ''
         working-directory: chart-update/charts/${{ matrix.component }}
         env:
-          TAG: sha-${{ github.sha }}
+          TAG: ${{ steps.version.outputs.release }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           # sed keeps comments and blank lines intact; yq then verifies the result.
@@ -155,17 +239,17 @@ jobs:
           [ "$(yq '.version' Chart.yaml)" = "$next" ]
 
       - name: Open chart update PR
-        if: github.ref == 'refs/heads/main'
+        if: steps.version.outputs.release != ''
         uses: peter-evans/create-pull-request@v8
         with:
           path: chart-update
           token: ${{ steps.bot-token.outputs.token }}
           branch: bot/pin-${{ matrix.component }}-image
           delete-branch: true
-          commit-message: "chore(charts): pin ${{ matrix.component }} image to sha-${{ github.sha }}"
-          title: "chore(charts): pin ${{ matrix.component }} image to sha-${{ github.sha }}"
+          commit-message: "chore(charts): pin ${{ matrix.component }} image to ${{ steps.version.outputs.release }}"
+          title: "chore(charts): pin ${{ matrix.component }} image to ${{ steps.version.outputs.release }}"
           body: |
-            Pins `charts/${{ matrix.component }}` to the image built from ${{ github.sha }} and bumps the chart's patch version.
+            Pins `charts/${{ matrix.component }}` to release [${{ matrix.component }}-v${{ steps.version.outputs.release }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ matrix.component }}-v${{ steps.version.outputs.release }}) (built from ${{ github.sha }}) and bumps the chart's patch version.
 
             - Digest: `${{ steps.build.outputs.digest }}`
             - Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

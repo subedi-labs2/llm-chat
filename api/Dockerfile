@@ -39,6 +39,12 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY src ./src
 
+# Set by the Release workflow and reported by /api/health.
+ARG APP_VERSION=dev
+ARG APP_COMMIT=unknown
+ENV APP_VERSION=$APP_VERSION \
+    APP_COMMIT=$APP_COMMIT
+
 USER app
 
 EXPOSE 8000

@@ -5,7 +5,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/subedi-labs2/llm-chat-web
-  # tag and digest are updated by the Release Images workflow; the digest is what gets pulled.
+  # tag and digest are pinned to each release by the Release workflow; the digest is what gets pulled.
   tag: sha-b211976842b248e5efb960807297379d9e1fcb7d
   digest: sha256:8ddfbc1662c84e41094df833f129dc5f65eb4a9284c5d33d42dfba2ee583e4f6
   pullPolicy: IfNotPresent
