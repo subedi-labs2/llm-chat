@@ -1,9 +1,12 @@
-
 name: Release
 
 on:
   push:
     branches: [main]
+    # Release tags are pushed by release-please (via the release bot App, so they trigger
+    # workflows). Publishing from the tag builds exactly the released commit, and a failed
+    # publish can be retried by re-running this workflow or dispatching it on the tag.
+    tags: ['api-v*', 'web-v*']
   workflow_dispatch:
 
 permissions:
@@ -11,7 +14,8 @@ permissions:
 
 jobs:
   # Opens or updates the release PR from conventional commits, and when that PR is merged,
-  # tags the release (api-vX.Y.Z / web-vX.Y.Z) and creates the GitHub Release.
+  # tags the release (api-vX.Y.Z / web-vX.Y.Z) and creates the GitHub Release. The tag push
+  # then runs this workflow again to publish the release.
   release-please:
     name: Release Please
     if: github.ref == 'refs/heads/main'
@@ -19,12 +23,9 @@ jobs:
     concurrency:
       group: release-please
       cancel-in-progress: false
-    outputs:
-      api: ${{ steps.release.outputs['api--release_created'] && steps.release.outputs['api--version'] || '' }}
-      web: ${{ steps.release.outputs['web--release_created'] && steps.release.outputs['web--version'] || '' }}
     steps:
-      # A GitHub App token so CI runs on the release PR (events from GITHUB_TOKEN don't
-      # trigger workflows).
+      # A GitHub App token so CI runs on the release PR and the release tags trigger this
+      # workflow (events from GITHUB_TOKEN don't trigger workflows).
       - name: Create release bot token
         id: bot-token
         uses: actions/create-github-app-token@v3
@@ -33,7 +34,6 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@v5
-        id: release
         with:
           token: ${{ steps.bot-token.outputs.token }}
           config-file: release-please-config.json
@@ -41,17 +41,15 @@ jobs:
 
   changes:
     name: Detect Changes
-    needs: release-please
-    # Also runs when release-please is skipped (manual runs from other branches).
-    if: ${{ !cancelled() && needs.release-please.result != 'failure' }}
     runs-on: ubuntu-latest
     outputs:
       components: ${{ steps.components.outputs.components }}
-      releases: ${{ steps.components.outputs.releases }}
+      release: ${{ steps.components.outputs.release }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Detect changed directories
+        if: github.ref_type == 'branch'
         uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -63,28 +61,42 @@ jobs:
               - 'web/**'
               - '.github/workflows/release.yml'
 
-      # Build changed components (all of them on manual runs) plus any just released.
+      # Release tags build only the tagged component. Branch pushes build changed
+      # components, and manual runs on a branch build all of them.
       - name: Select components
         id: components
         env:
           MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
           CHANGED: ${{ steps.filter.outputs.changes }}
-          API_RELEASE: ${{ needs.release-please.outputs.api }}
-          WEB_RELEASE: ${{ needs.release-please.outputs.web }}
         run: |
-          releases=$(jq -cn --arg api "$API_RELEASE" --arg web "$WEB_RELEASE" \
-            '{api: $api, web: $web} | with_entries(select(.value != ""))')
-          if [ "$MANUAL" = true ]; then CHANGED='["api","web"]'; fi
-          components=$(jq -cn --argjson changed "$CHANGED" --argjson releases "$releases" \
-            '$changed + ($releases | keys) | unique')
-          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+          release=""
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            component=${GITHUB_REF_NAME%%-v*}
+            release=${GITHUB_REF_NAME#*-v}
+            case "$component" in api|web) ;; *) echo "::error::Unknown component in tag $GITHUB_REF_NAME"; exit 1 ;; esac
+            if ! [[ "$release" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME is not <component>-vX.Y.Z"
+              exit 1
+            fi
+            manifest=$(jq -r --arg c "$component" '.[$c]' .release-please-manifest.json)
+            if [ "$manifest" != "$release" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match the manifest version ($manifest) at ${GITHUB_SHA::7}"
+              exit 1
+            fi
+            components=$(jq -cn --arg c "$component" '[$c]')
+          elif [ "$MANUAL" = true ]; then
+            components='["api","web"]'
+          else
+            components=$CHANGED
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "components=$components" >> "$GITHUB_OUTPUT"
-          echo "Components: $components, releases: $releases"
+          echo "Components: $components, release: ${release:-none}"
 
   publish:
     name: Publish ${{ matrix.component }}
     needs: changes
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.components != '[]' }}
+    if: needs.changes.outputs.components != '[]'
     runs-on: ubuntu-latest
 
     permissions:
@@ -104,12 +116,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Releases build as X.Y.Z; other builds report the last release plus the commit.
+      # Release tags build as X.Y.Z; other builds report the last release plus the commit.
       - name: Determine version
         id: version
         env:
           COMPONENT: ${{ matrix.component }}
-          RELEASE: ${{ fromJSON(needs.changes.outputs.releases)[matrix.component] }}
+          RELEASE: ${{ needs.changes.outputs.release }}
         run: |
           if [ -n "$RELEASE" ]; then
             version=$RELEASE
@@ -192,7 +204,7 @@ jobs:
       # Pin released images in the component's chart via a PR. Uses a GitHub App token
       # so CI runs on the PR (events from GITHUB_TOKEN don't trigger workflows).
       - name: Create release bot token
-        if: github.ref == 'refs/heads/main' && steps.version.outputs.release != ''
+        if: steps.version.outputs.release != ''
         id: bot-token
         uses: actions/create-github-app-token@v3
         with:
@@ -200,7 +212,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
 
       - name: Check out main for chart update
-        if: github.ref == 'refs/heads/main' && steps.version.outputs.release != ''
+        if: steps.version.outputs.release != ''
         uses: actions/checkout@v6
         with:
           ref: main
@@ -208,7 +220,7 @@ jobs:
           token: ${{ steps.bot-token.outputs.token }}
 
       - name: Pin image in chart
-        if: github.ref == 'refs/heads/main' && steps.version.outputs.release != ''
+        if: steps.version.outputs.release != ''
         working-directory: chart-update/charts/${{ matrix.component }}
         env:
           TAG: ${{ steps.version.outputs.release }}
@@ -227,7 +239,7 @@ jobs:
           [ "$(yq '.version' Chart.yaml)" = "$next" ]
 
       - name: Open chart update PR
-        if: github.ref == 'refs/heads/main' && steps.version.outputs.release != ''
+        if: steps.version.outputs.release != ''
         uses: peter-evans/create-pull-request@v8
         with:
           path: chart-update

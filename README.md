@@ -136,7 +136,7 @@ Troubleshooting: `kubectl -n llm-chat logs -l app=cloudflared`. `Provided Tunnel
 The API and web are versioned independently with [release-please](https://github.com/googleapis/release-please), using [Conventional Commits](https://www.conventionalcommits.org). PRs are squash-merged with the PR title as the commit message, so CI requires conventional PR titles (`feat: …`, `fix(api): …`). While versions are below 1.0, `feat` bumps the minor version and `fix` the patch version.
 
 1. On each push to `main`, the **Release** workflow opens or updates a release PR that bumps the versions in `api/pyproject.toml` (and `uv.lock`) and `web/package.json`, and updates each `CHANGELOG.md`. Changed components also get a `sha-<commit>` image for testing; these are not deployed.
-2. Merging the release PR tags each released component (`api-vX.Y.Z`, `web-vX.Y.Z`), creates a GitHub Release, publishes an image tagged `X.Y.Z`, and opens a PR that pins that image's digest in the chart and bumps the chart's patch version.
+2. Merging the release PR tags each released component (`api-vX.Y.Z`, `web-vX.Y.Z`) and creates a GitHub Release. Each tag push runs **Release** again, which builds the tagged commit, publishes an image tagged `X.Y.Z`, and opens a PR that pins that image's digest in the chart and bumps the chart's patch version. If publishing fails, re-run that workflow run, or run **Release** manually and pick the tag.
 3. CI lints and validates the charts, requires a version bump for any chart change, and installs both charts into a kind cluster.
 4. Merging a chart change runs **Release Charts**, which publishes any chart version not already in GHCR.
 
