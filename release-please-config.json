@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "0594e726f01c70d89ae193a05fc8fda2417acd86",
+  "include-component-in-tag": true,
+  "bump-minor-pre-major": true,
+  "packages": {
+    "api": {
+      "release-type": "python",
+      "component": "api",
+      "package-name": "safety-assistant-api",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='safety-assistant-api')].version"
+        }
+      ]
+    },
+    "web": {
+      "release-type": "node",
+      "component": "web",
+      "package-name": "safety-assistant-web"
+    }
+  }
+}

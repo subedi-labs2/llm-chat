@@ -10,6 +10,9 @@ AgentBackend = Literal["pydantic_ai", "langchain"]
 class Settings(BaseSettings):
     app_name: str = "Consumer Product & Vehicle Safety API"
     app_env: Literal["development", "test", "production"] = "development"
+    # Release version and git commit of this build, set by the image build.
+    app_version: str = "dev"
+    app_commit: str = "unknown"
 
     # Framework that runs the chat agent. Both use the same Gemini settings below.
     agent_backend: AgentBackend = "pydantic_ai"

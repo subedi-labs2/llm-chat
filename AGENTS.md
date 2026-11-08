@@ -6,4 +6,5 @@
 - Keep product-safety integrations behind clear API boundaries: recall data clients live in `api/src/recalls`, and the chat agents (Pydantic AI by default, LangChain via `AGENT_BACKEND=langchain`) and chat endpoint live in `api/src/chat`; keep both agents behaviorally equivalent. Recall facts must come from tool results, not model memory. Do not add a database, authentication, additional AI services, or new state management without a concrete requirement.
 - Manage Python dependencies with `uv` and JavaScript dependencies with npm. Commit both lockfiles and justify every new runtime dependency.
 - Helm charts live in `charts/api` and `charts/web`. Bump a chart's `version` in `Chart.yaml` whenever its templates or values change; image tags and digests are pinned by the release bot.
+- Use Conventional Commit PR titles (`feat:`, `fix:`, `docs:`, `chore:`…); release-please uses them to version `api` and `web`. Don't edit versions or changelogs by hand.
 - Before handing off, run the affected lint, format, type, test, and build checks. Update documentation when commands or architecture change.

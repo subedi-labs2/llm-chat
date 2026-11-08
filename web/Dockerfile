@@ -16,7 +16,10 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 FROM deps AS build
 
 COPY . .
-RUN npm run build
+# Set by the Release workflow and shown in the app footer.
+ARG APP_VERSION=dev
+ARG APP_COMMIT=unknown
+RUN VITE_APP_VERSION=$APP_VERSION VITE_APP_COMMIT=$APP_COMMIT npm run build
 
 FROM nginxinc/nginx-unprivileged:1.31-alpine AS prod
 

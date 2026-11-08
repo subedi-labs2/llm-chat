@@ -2,11 +2,12 @@ import { CheckCircle2, ShieldCheck } from "lucide-react";
 
 import { BackendToggle } from "@/components/backend-toggle";
 import { Chat } from "@/components/chat";
+import { VersionInfo } from "@/components/version-info";
 import { useAgentBackend } from "@/hooks/use-agent-backend";
 import { useApiStatus } from "@/hooks/use-api-status";
 
 function App() {
-  const apiStatus = useApiStatus();
+  const { status: apiStatus, health } = useApiStatus();
   const { backend, setBackend } = useAgentBackend(apiStatus === "connected");
 
   return (
@@ -67,6 +68,8 @@ function App() {
           responsible agency.
         </p>
       </main>
+
+      <VersionInfo api={health} />
     </div>
   );
 }
