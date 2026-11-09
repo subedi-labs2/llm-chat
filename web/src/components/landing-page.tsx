@@ -1,42 +1,38 @@
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import { Button } from "@/components/ui/button";
 
-// Three.js is only needed here, so keep it out of the main chat bundle.
-const RobotHead = lazy(() => import("@/components/robot-head"));
-
-const NOD_MS = 550;
 const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
 type LandingPageProps = {
+  entering: boolean;
   onEnter: () => void;
+  onSkip: () => void;
+  headSlotRef: (element: HTMLDivElement | null) => void;
 };
 
-export function LandingPage({ onEnter }: LandingPageProps) {
+export function LandingPage({
+  entering,
+  onEnter,
+  onSkip,
+  headSlotRef,
+}: LandingPageProps) {
   const reducedMotion = useReducedMotion() ?? false;
-  const [entering, setEntering] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     buttonRef.current?.focus();
   }, []);
 
-  // Let the head nod before handing off to the site.
-  useEffect(() => {
-    if (!entering) return;
-    const timer = window.setTimeout(onEnter, reducedMotion ? 0 : NOD_MS);
-    return () => window.clearTimeout(timer);
-  }, [entering, onEnter, reducedMotion]);
-
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onEnter();
+      if (event.key === "Escape") onSkip();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onEnter]);
+  }, [onSkip]);
 
   return (
     <motion.div
@@ -70,18 +66,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.9, ease: EASE_OUT }}
       >
-        <Suspense
-          fallback={
-            <div className="grid h-full place-items-center">
-              <ShieldCheck
-                className="size-16 animate-pulse text-teal-400"
-                aria-hidden="true"
-              />
-            </div>
-          }
-        >
-          <RobotHead entering={entering} reducedMotion={reducedMotion} />
-        </Suspense>
+        <div ref={headSlotRef} className="h-full w-full" />
       </motion.div>
 
       <motion.div
@@ -106,7 +91,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
 
         <Button
           ref={buttonRef}
-          onClick={() => setEntering(true)}
+          onClick={onEnter}
           disabled={entering}
           className="group mt-8 h-12 rounded-full bg-teal-500 px-7 text-base font-semibold text-slate-950 shadow-[0_0_40px_-8px_rgba(45,212,191,0.8)] hover:bg-teal-400 focus-visible:ring-teal-300 disabled:opacity-100 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
         >

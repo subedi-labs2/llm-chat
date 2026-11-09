@@ -11,7 +11,7 @@ const TEAL = "#2dd4bf";
 const SHELL = "#e2e8f0";
 const ACCENT = "#0f766e";
 
-type Pointer = { x: number; y: number };
+type Pointer = { x: number; y: number } | null;
 
 type RobotHeadProps = {
   entering: boolean;
@@ -19,14 +19,13 @@ type RobotHeadProps = {
 };
 
 // Tracks the pointer across the whole window (not just the canvas) so the
-// head keeps following while the cursor is over the overlay text and button.
+// head keeps following while the cursor is over text, buttons, or the chat.
 function useWindowPointer() {
-  const pointer = useRef<Pointer>({ x: 0, y: 0 });
+  const pointer = useRef<Pointer>(null);
 
   useEffect(() => {
     function onMove(event: PointerEvent) {
-      pointer.current.x = (event.clientX / window.innerWidth) * 2 - 1;
-      pointer.current.y = -((event.clientY / window.innerHeight) * 2 - 1);
+      pointer.current = { x: event.clientX, y: event.clientY };
     }
     window.addEventListener("pointermove", onMove, { passive: true });
     return () => window.removeEventListener("pointermove", onMove);
@@ -54,7 +53,25 @@ function Head({
     const head = root.current;
     if (!head) return;
 
-    const { x, y } = pointer.current;
+    // Aim relative to where the head is on screen, so it still looks at the
+    // cursor once it has shrunk into the site header.
+    let x = 0;
+    let y = 0;
+    if (pointer.current) {
+      const rect = state.gl.domElement.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      x = MathUtils.clamp(
+        (pointer.current.x - cx) / (window.innerWidth / 2),
+        -1,
+        1,
+      );
+      y = MathUtils.clamp(
+        (cy - pointer.current.y) / (window.innerHeight / 2),
+        -1,
+        1,
+      );
+    }
     let targetY = x * 0.7;
     let targetX = -y * 0.45;
 

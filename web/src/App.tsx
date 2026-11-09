@@ -1,10 +1,11 @@
-import { CheckCircle2, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { BackendToggle } from "@/components/backend-toggle";
 import { Chat } from "@/components/chat";
 import { LandingPage } from "@/components/landing-page";
+import { MascotHead } from "@/components/mascot-head";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { VersionInfo } from "@/components/version-info";
 import { useAgentBackend } from "@/hooks/use-agent-backend";
@@ -13,27 +14,61 @@ import { useChatConfig } from "@/hooks/use-chat-config";
 import { useTheme } from "@/hooks/use-theme";
 import { THEME_TOGGLE_ENABLED } from "@/lib/config";
 
+const NOD_MS = 550;
+
+type Phase = "landing" | "nodding" | "entered";
+
 function App() {
   const { status: apiStatus, health } = useApiStatus();
   const chatConfig = useChatConfig(apiStatus === "connected");
   const { backend, setBackend } = useAgentBackend(chatConfig);
   const { theme, setTheme } = useTheme();
-  const [entered, setEntered] = useState(false);
-  const enter = useCallback(() => setEntered(true), []);
   const reducedMotion = useReducedMotion() ?? false;
+  const [phase, setPhase] = useState<Phase>("landing");
+  const [landingSlot, setLandingSlot] = useState<HTMLDivElement | null>(null);
+  const [siteSlot, setSiteSlot] = useState<HTMLDivElement | null>(null);
+  const entered = phase === "entered";
+
+  const startEnter = useCallback(
+    () => setPhase((current) => (current === "landing" ? "nodding" : current)),
+    [],
+  );
+  const skip = useCallback(() => setPhase("entered"), []);
+
+  // Let the head nod before handing off to the site.
+  useEffect(() => {
+    if (phase !== "nodding") return;
+    const timer = window.setTimeout(skip, reducedMotion ? 0 : NOD_MS);
+    return () => window.clearTimeout(timer);
+  }, [phase, reducedMotion, skip]);
 
   return (
     <>
       <AnimatePresence>
-        {!entered && <LandingPage key="landing" onEnter={enter} />}
+        {!entered && (
+          <LandingPage
+            key="landing"
+            entering={phase === "nodding"}
+            onEnter={startEnter}
+            onSkip={skip}
+            headSlotRef={setLandingSlot}
+          />
+        )}
       </AnimatePresence>
+      <MascotHead
+        landingSlot={landingSlot}
+        siteSlot={siteSlot}
+        docked={entered}
+        nodding={phase === "nodding"}
+        reducedMotion={reducedMotion}
+      />
       <motion.div
         inert={!entered}
         initial={false}
         animate={
           entered || reducedMotion
-            ? { opacity: 1, scale: 1, filter: "blur(0px)" }
-            : { opacity: 0, scale: 0.97, filter: "blur(8px)" }
+            ? { opacity: 1, filter: "blur(0px)" }
+            : { opacity: 0, filter: "blur(8px)" }
         }
         transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
         className="flex min-h-screen flex-col bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-50"
@@ -74,9 +109,11 @@ function App() {
 
         <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 sm:py-20">
           <section className="text-center">
-            <div className="mx-auto mb-6 grid size-14 place-items-center rounded-2xl border border-teal-100 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950 dark:text-teal-300">
-              <CheckCircle2 className="size-7" aria-hidden="true" />
-            </div>
+            <div
+              ref={setSiteSlot}
+              aria-hidden="true"
+              className="mx-auto mb-4 size-24"
+            />
             <p className="mb-3 text-sm font-semibold tracking-wide text-teal-700 uppercase dark:text-teal-400">
               Product and vehicle safety
             </p>
