@@ -37,10 +37,11 @@ MAX_CHUNK_BYTES = BYTES_PER_SECOND
 AUDIO_BURST_SECONDS = 2.0
 # speaches ends a phrase only once its latest 3 s of audio are silent, so stopping sends 3.5 s.
 FLUSH_SILENCE = bytes(BYTES_PER_SECOND * 7 // 2)
-# After a stop, how long to wait for speaches to react to the silence before finishing.
-SETTLE_SECONDS = 0.75
+# Sent after the stop's silence. speaches handles client events in order, so its reply
+# (session.updated) follows every speech event for the audio before it.
+FLUSH_MARKER = json.dumps({"type": "session.update", "session": {}})
+# Upper bound on finishing after a stop; exceeding it is a failure.
 FLUSH_TIMEOUT_SECONDS = 30.0
-POLL_SECONDS = 0.25
 
 
 class CloseCode(IntEnum):
@@ -70,14 +71,15 @@ class AudioLimit(Exception):
 @dataclass
 class SessionState:
     in_speech: bool = False
-    # Phrases sent for transcription whose transcript hasn't arrived yet.
+    # Phrases that ended (speech_stopped) whose transcript hasn't arrived yet. Counted from
+    # speech_stopped because speaches sends input_audio_buffer.committed later.
     pending: int = 0
-    stopped_at: float | None = None
+    stopped: bool = False
+    # speaches acknowledged the flush marker, so all speech events have been received.
+    flushed: bool = False
 
     def finished(self) -> bool:
-        if self.stopped_at is None or self.in_speech or self.pending:
-            return False
-        return time.monotonic() - self.stopped_at >= SETTLE_SECONDS
+        return self.flushed and not self.in_speech and not self.pending
 
 
 def upstream_url(settings: Settings) -> str:
@@ -130,33 +132,30 @@ async def forward_audio(
                 raise InvalidAudio
             await upstream.send(append_event(audio))
         elif is_stop(message.get("text") or ""):
+            state.stopped = True
             await upstream.send(append_event(FLUSH_SILENCE))
-            state.stopped_at = time.monotonic()
+            await upstream.send(FLUSH_MARKER)
             return
 
 
 async def forward_events(ws: WebSocket, upstream: ClientConnection, state: SessionState) -> None:
-    """Sends speaches results to the browser until the session finishes after a stop."""
+    """Sends speaches results to the browser until every phrase is transcribed after a stop."""
     while not state.finished():
-        try:
-            async with asyncio.timeout(POLL_SECONDS):
-                raw = await upstream.recv()
-        except TimeoutError:
-            continue
-        event: dict[str, Any] = json.loads(raw)
+        event: dict[str, Any] = json.loads(await upstream.recv())
         match event.get("type"):
             case "input_audio_buffer.speech_started":
                 state.in_speech = True
                 await ws.send_json({"type": "speech_started"})
             case "input_audio_buffer.speech_stopped":
                 state.in_speech = False
-            case "input_audio_buffer.committed":
                 state.pending += 1
+            case "session.updated" if state.stopped:
+                state.flushed = True
             case "conversation.item.input_audio_transcription.completed":
                 state.pending = max(state.pending - 1, 0)
                 if text := str(event.get("transcript") or "").strip():
                     await ws.send_json({"type": "transcript", "text": text})
-            case "error":
+            case "error" | "conversation.item.input_audio_transcription.failed":
                 logger.error("Transcription server error: %s", event.get("error"))
                 raise UpstreamError
 
