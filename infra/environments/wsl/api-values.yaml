@@ -5,9 +5,10 @@ gemini:
 extraEnv:
   - name: AGENT_BACKEND
     value: pydantic_ai
-  # Keep off: the app has no login, so any visitor could switch backends.
+  # Shows the Pydantic AI / LangChain toggle in the web header. The app has no
+  # login, so any visitor can switch backends.
   - name: ALLOW_BACKEND_SELECTION
-    value: "false"
+    value: "true"
   - name: GEMINI_MODEL
     value: gemini-3.8-flash
   - name: GEMINI_FALLBACK_MODELS
