@@ -10,8 +10,6 @@ const CLOSE_ERRORS: Record<number, VoiceInputError> = {
 };
 
 const STOP_MESSAGE = JSON.stringify({ type: "stop" });
-// Audio captured before the server is ready (100 ms chunks).
-const MAX_QUEUED_CHUNKS = 50;
 
 interface ServerMessage {
   type: "ready" | "speech_started" | "transcript";
@@ -19,6 +17,8 @@ interface ServerMessage {
 }
 
 export interface VoiceInputHandlers {
+  /** Called once the server is ready and audio is being captured; speech before this is not heard. */
+  onRecording: () => void;
   /** Called with each transcribed phrase. */
   onTranscript: (text: string) => void;
   /** Called once when the session ends; `error` is null after a normal stop. */
@@ -26,7 +26,10 @@ export interface VoiceInputHandlers {
 }
 
 export interface VoiceInputSession {
-  /** Stops recording. Phrases still being transcribed arrive before `onEnd`. */
+  /**
+   * Stops recording. Phrases still being transcribed arrive before `onEnd`. Before
+   * `onRecording`, nothing has been captured, so the session ends right away.
+   */
   stop: () => void;
   /** Ends the session immediately without calling `onEnd`. */
   cancel: () => void;
@@ -44,23 +47,27 @@ function transcribeUrl(): string {
   return `${scheme}://${window.location.host}/api/transcribe`;
 }
 
-/** Starts recording; call from a user gesture so the browser allows audio capture. */
+/**
+ * Connects and prepares the microphone, then records once the server is ready, so no
+ * speech is buffered or dropped while connecting. Call from a user gesture so the
+ * browser allows audio capture.
+ */
 export function startVoiceInput({
+  onRecording,
   onTranscript,
   onEnd,
 }: VoiceInputHandlers): VoiceInputSession {
   const context = new AudioContext();
   const socket = new WebSocket(transcribeUrl());
   socket.binaryType = "arraybuffer";
-  const queue: ArrayBuffer[] = [];
   let stream: MediaStream | null = null;
   let recorder: AudioWorkletNode | null = null;
-  let recording = true;
+  let phase: "connecting" | "recording" | "stopped" = "connecting";
   let ready = false;
   let ended = false;
 
   function stopAudio() {
-    recording = false;
+    phase = "stopped";
     recorder?.port.close();
     recorder?.disconnect();
     stream?.getTracks().forEach((track) => track.stop());
@@ -75,9 +82,14 @@ export function startVoiceInput({
     if (notify) onEnd(error);
   }
 
-  function sendAudio(chunk: ArrayBuffer) {
-    if (ready) socket.send(chunk);
-    else if (queue.length < MAX_QUEUED_CHUNKS) queue.push(chunk);
+  /** Starts capturing once both the server and the microphone are ready. */
+  function startRecording() {
+    if (!ready || !stream || !recorder || phase !== "connecting") return;
+    phase = "recording";
+    // The recorder outputs silence; connecting it keeps it processing in every browser.
+    context.createMediaStreamSource(stream).connect(recorder);
+    recorder.connect(context.destination);
+    context.resume().then(onRecording, () => finish("failed"));
   }
 
   socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
@@ -85,8 +97,7 @@ export function startVoiceInput({
     const message = JSON.parse(event.data) as ServerMessage;
     if (message.type === "ready") {
       ready = true;
-      queue.splice(0).forEach((chunk) => socket.send(chunk));
-      if (!recording) socket.send(STOP_MESSAGE);
+      startRecording();
     } else if (message.type === "transcript" && message.text) {
       onTranscript(message.text);
     }
@@ -108,29 +119,27 @@ export function startVoiceInput({
       finish("permission");
       return;
     }
-    if (!recording) return stopAudio();
+    if (phase !== "connecting") return stopAudio();
     await context.audioWorklet.addModule("/pcm-recorder-worklet.js");
-    if (!recording) return stopAudio();
+    if (phase !== "connecting") return stopAudio();
     recorder = new AudioWorkletNode(context, "pcm-recorder");
     recorder.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      sendAudio(event.data);
+      socket.send(event.data);
     };
-    // The recorder outputs silence; connecting it keeps it processing in every browser.
-    context.createMediaStreamSource(stream).connect(recorder);
-    recorder.connect(context.destination);
-    await context.resume();
+    startRecording();
   }
 
   startAudio().catch(() => {
-    if (recording) finish("failed");
+    if (phase === "connecting") finish("failed");
   });
 
   return {
     stop() {
-      if (ended || !recording) return;
+      if (ended) return;
+      if (phase === "connecting") return finish(null);
+      if (phase !== "recording") return;
       stopAudio();
-      // Before the server is ready, the stop is sent once it is.
-      if (ready) socket.send(STOP_MESSAGE);
+      socket.send(STOP_MESSAGE);
     },
     cancel() {
       finish(null, false);

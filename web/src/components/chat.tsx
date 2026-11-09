@@ -271,13 +271,15 @@ export function Chat({ backend, voiceInput }: ChatProps) {
             }`}
             aria-live="polite"
           >
-            {voice.status === "recording"
-              ? "Listening… your words appear after each pause"
-              : voice.status === "finishing"
-                ? "Finishing transcription…"
-                : voice.error
-                  ? VOICE_INPUT_ERRORS[voice.error]
-                  : "Answers use live NHTSA and CPSC recall data"}
+            {voice.status === "connecting"
+              ? "Starting voice input… wait for “Listening” to speak"
+              : voice.status === "recording"
+                ? "Listening… your words appear after each pause"
+                : voice.status === "finishing"
+                  ? "Finishing transcription…"
+                  : voice.error
+                    ? VOICE_INPUT_ERRORS[voice.error]
+                    : "Answers use live NHTSA and CPSC recall data"}
           </span>
           <div className="flex shrink-0 items-center gap-2">
             {showVoiceInput && (
@@ -285,15 +287,15 @@ export function Chat({ backend, voiceInput }: ChatProps) {
                 type="button"
                 size="icon"
                 variant="outline"
-                onClick={
-                  voice.status === "recording" ? voice.stop : voice.start
-                }
+                onClick={voice.status === "idle" ? voice.start : voice.stop}
                 disabled={voice.status === "finishing"}
                 aria-pressed={voice.status === "recording"}
                 aria-label={
-                  voice.status === "recording"
-                    ? "Stop voice input"
-                    : "Start voice input"
+                  voice.status === "connecting"
+                    ? "Cancel voice input"
+                    : voice.status === "recording"
+                      ? "Stop voice input"
+                      : "Start voice input"
                 }
               >
                 {voice.status === "recording" ? (
@@ -301,7 +303,7 @@ export function Chat({ backend, voiceInput }: ChatProps) {
                     className="size-4 animate-pulse fill-rose-600 text-rose-600"
                     aria-hidden="true"
                   />
-                ) : voice.status === "finishing" ? (
+                ) : voice.status !== "idle" ? (
                   <LoaderCircle
                     className="size-4 animate-spin"
                     aria-hidden="true"

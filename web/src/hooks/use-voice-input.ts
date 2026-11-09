@@ -6,8 +6,12 @@ import {
   type VoiceInputSession,
 } from "@/lib/transcribe";
 
-/** `finishing` means recording stopped and the last phrases are being transcribed. */
-export type VoiceInputStatus = "idle" | "recording" | "finishing";
+/**
+ * `connecting` means the session is starting and nothing is recorded yet; `finishing` means
+ * recording stopped and the last phrases are being transcribed.
+ */
+export type VoiceInputStatus =
+  "idle" | "connecting" | "recording" | "finishing";
 
 export interface VoiceInput {
   status: VoiceInputStatus;
@@ -33,8 +37,9 @@ export function useVoiceInput(
   function start() {
     if (sessionRef.current) return;
     setError(null);
-    setStatus("recording");
+    setStatus("connecting");
     sessionRef.current = startVoiceInput({
+      onRecording: () => setStatus("recording"),
       onTranscript: (text) => onTranscriptRef.current(text),
       onEnd: (endError) => {
         sessionRef.current = null;
@@ -47,7 +52,8 @@ export function useVoiceInput(
   function stop() {
     if (!sessionRef.current) return;
     sessionRef.current.stop();
-    setStatus("finishing");
+    // Stopping while connecting ends the session at once (onEnd already cleared the ref).
+    if (sessionRef.current) setStatus("finishing");
   }
 
   return { status, error, start, stop };
