@@ -10,6 +10,8 @@ const CLOSE_ERRORS: Record<number, VoiceInputError> = {
 };
 
 const STOP_MESSAGE = JSON.stringify({ type: "stop" });
+// Fallback if the recorder never confirms the flush (for example, a suspended AudioContext).
+const FLUSH_TIMEOUT_MS = 500;
 
 interface ServerMessage {
   type: "ready" | "speech_started" | "transcript";
@@ -62,7 +64,7 @@ export function startVoiceInput({
   socket.binaryType = "arraybuffer";
   let stream: MediaStream | null = null;
   let recorder: AudioWorkletNode | null = null;
-  let phase: "connecting" | "recording" | "stopped" = "connecting";
+  let phase: "connecting" | "recording" | "flushing" | "stopped" = "connecting";
   let ready = false;
   let ended = false;
 
@@ -123,10 +125,18 @@ export function startVoiceInput({
     await context.audioWorklet.addModule("/pcm-recorder-worklet.js");
     if (phase !== "connecting") return stopAudio();
     recorder = new AudioWorkletNode(context, "pcm-recorder");
-    recorder.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      socket.send(event.data);
+    recorder.port.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
+      if (event.data === "flushed") endRecording();
+      else if (!ended) socket.send(event.data);
     };
     startRecording();
+  }
+
+  /** Sends stop after the recorder's last audio, then releases the microphone. */
+  function endRecording() {
+    if (phase !== "flushing") return;
+    stopAudio();
+    if (!ended) socket.send(STOP_MESSAGE);
   }
 
   startAudio().catch(() => {
@@ -138,8 +148,11 @@ export function startVoiceInput({
       if (ended) return;
       if (phase === "connecting") return finish(null);
       if (phase !== "recording") return;
-      stopAudio();
-      socket.send(STOP_MESSAGE);
+      // The recorder posts only full 100 ms chunks; flush the partial one so the last
+      // syllable isn't lost. Port messages arrive in order, so its audio precedes "flushed".
+      phase = "flushing";
+      recorder?.port.postMessage("flush");
+      setTimeout(endRecording, FLUSH_TIMEOUT_MS);
     },
     cancel() {
       finish(null, false);
