@@ -13,7 +13,7 @@ export function BackendToggle({ value, onChange }: BackendToggleProps) {
     <div
       role="group"
       aria-label="Agent framework"
-      className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+      className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-900"
     >
       {BACKENDS.map((backend) => {
         const selected = backend === value;
@@ -25,7 +25,9 @@ export function BackendToggle({ value, onChange }: BackendToggleProps) {
             aria-pressed={selected}
             onClick={() => onChange(backend)}
             className={`h-7 rounded-md px-2.5 text-xs ${
-              selected ? "" : "border-transparent bg-transparent"
+              selected
+                ? ""
+                : "border-transparent bg-transparent dark:bg-transparent"
             }`}
           >
             {AGENT_BACKEND_LABELS[backend]}

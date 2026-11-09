@@ -47,6 +47,9 @@
       "type": "string",
       "pattern": "^https?://"
     },
+    "themeToggle": {
+      "type": "boolean"
+    },
     "service": {
       "type": "object",
       "additionalProperties": false,

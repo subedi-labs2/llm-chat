@@ -38,6 +38,8 @@ spec:
           env:
             - name: API_UPSTREAM
               value: {{ tpl .Values.apiUpstream . | quote }}
+            - name: THEME_TOGGLE
+              value: {{ .Values.themeToggle | quote }}
           readinessProbe:
             httpGet:
               path: /

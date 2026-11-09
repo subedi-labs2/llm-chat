@@ -26,7 +26,9 @@ FROM nginxinc/nginx-unprivileged:1.31-alpine AS prod
 # Backend base URL that /api requests are proxied to; override at deploy time.
 # nginx's resolver ignores DNS search domains, so use a fully qualified name in
 # Kubernetes (for example http://api.<namespace>.svc.cluster.local:8000).
+# THEME_TOGGLE (true/false) shows the light/dark mode toggle in the header.
 ENV API_UPSTREAM=http://backend:8000 \
+    THEME_TOGGLE=true \
     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
