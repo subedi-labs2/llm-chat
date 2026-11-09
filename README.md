@@ -12,7 +12,7 @@ A public-facing assistant that helps people research product and vehicle safety.
 ## Structure
 
 - `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agents and `/api/chat` endpoint, `src/transcribe` voice input relay)
-- `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
+- `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui; the intro landing page uses React Three Fiber (lazy-loaded) and Motion
 - `charts/` — Helm charts for the API, web, and speech-to-text (stt), released independently
 - `infra/` — local k3d cluster config, per-environment chart values, and the Cloudflare Tunnel connector
 - `.github/workflows/` — pull request and `main` branch checks, image and chart releases
