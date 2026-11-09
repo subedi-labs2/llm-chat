@@ -1,0 +1,66 @@
+# Resources are named after the Helm release (release "stt" creates Service "stt").
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/speaches-ai/speaches
+  # CPU build of speaches. The digest is what gets pulled.
+  tag: 0.9.0-rc.3-cpu
+  digest: sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# faster-whisper model from Hugging Face. An init container downloads it on first start; the
+# server then runs offline. The API's STT_MODEL must match.
+model: Systran/faster-distil-whisper-small.en
+
+whisper:
+  # int8 is the fastest choice on CPU.
+  computeType: int8
+  # Threads per transcription; 0 lets CTranslate2 decide.
+  cpuThreads: 0
+
+# Additional environment variables for speaches (see https://speaches.ai/configuration/).
+extraEnv: []
+
+# Stores downloaded models so restarts don't download them again.
+persistence:
+  enabled: true
+  # Use an existing PersistentVolumeClaim instead of creating one.
+  existingClaim: ""
+  # Leave empty to use the cluster's default StorageClass.
+  storageClassName: ""
+  size: 2Gi
+
+service:
+  type: ClusterIP
+  port: 8000
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Transcription is CPU-bound; each active voice session uses about one core while transcribing.
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 3Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

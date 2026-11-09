@@ -498,9 +498,9 @@ def test_chat_requires_cpsc_search_terms_before_calling_cpsc() -> None:
     assert any("product_name, manufacturer, or recall_number" in text for text in feedback)
 
 
-def test_chat_config_reports_backend_selection() -> None:
+def test_chat_config_reports_backend_selection_and_voice_input() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
-        agent_backend="langchain", allow_backend_selection=True
+        agent_backend="langchain", allow_backend_selection=True, stt_url="http://stt:8000"
     )
 
     async def request() -> Response:
@@ -511,7 +511,11 @@ def test_chat_config_reports_backend_selection() -> None:
     response = asyncio.run(request())
 
     assert response.status_code == 200
-    assert response.json() == {"default_backend": "langchain", "backend_selection": True}
+    assert response.json() == {
+        "default_backend": "langchain",
+        "backend_selection": True,
+        "voice_input": True,
+    }
 
 
 @pytest.mark.parametrize(

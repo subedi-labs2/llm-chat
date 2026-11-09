@@ -24,6 +24,8 @@ export const AGENT_BACKEND_LABELS: Record<AgentBackend, string> = {
 export interface ChatConfig {
   default_backend: AgentBackend;
   backend_selection: boolean;
+  /** Whether the API's /api/transcribe voice input is configured. */
+  voice_input: boolean;
 }
 
 export async function getChatConfig(signal?: AbortSignal): Promise<ChatConfig> {

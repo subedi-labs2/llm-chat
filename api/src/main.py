@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from src.chat.router import router as chat_router
 from src.core.config import get_settings
 from src.health.router import router as health_router
+from src.transcribe.router import router as transcribe_router
 
 settings = get_settings()
 
@@ -21,3 +22,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 app.include_router(health_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(transcribe_router, prefix="/api")

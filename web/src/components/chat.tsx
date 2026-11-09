@@ -1,4 +1,11 @@
-import { ArrowUp, ExternalLink, LoaderCircle, RotateCcw } from "lucide-react";
+import {
+  ArrowUp,
+  ExternalLink,
+  LoaderCircle,
+  Mic,
+  RotateCcw,
+  Square,
+} from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -8,6 +15,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useVoiceInput } from "@/hooks/use-voice-input";
 import {
   AGENT_BACKEND_LABELS,
   ChatError,
@@ -16,6 +24,7 @@ import {
   type ChatMessage,
   type ChatSource,
 } from "@/lib/api";
+import { isVoiceInputSupported, type VoiceInputError } from "@/lib/transcribe";
 
 const MAX_MESSAGE_LENGTH = 4000;
 // Keep the request under the API's 20-message limit while preserving recent context.
@@ -29,6 +38,23 @@ interface ChatTurn extends ChatMessage {
 interface ChatProps {
   /** The agent backend to request, or null to use the API's default. */
   backend: AgentBackend | null;
+  /** Show the microphone button (the API has voice input configured). */
+  voiceInput: boolean;
+}
+
+const VOICE_INPUT_ERRORS: Record<VoiceInputError, string> = {
+  permission:
+    "Microphone access is blocked. Allow it in your browser to use voice input.",
+  unavailable: "Voice input isn't available right now.",
+  busy: "Voice input is busy. Please try again in a moment.",
+  time_limit:
+    "Voice input reached its time limit. Your words so far were kept.",
+  failed: "Voice input stopped unexpectedly. Please try again.",
+};
+
+function appendTranscript(draft: string, text: string): string {
+  const joined = draft.trim() ? `${draft.trimEnd()} ${text}` : text;
+  return joined.slice(0, MAX_MESSAGE_LENGTH);
 }
 
 function errorMessage(error: unknown): string {
@@ -38,7 +64,7 @@ function errorMessage(error: unknown): string {
   return "Something went wrong while researching your question. Please try again.";
 }
 
-export function Chat({ backend }: ChatProps) {
+export function Chat({ backend, voiceInput }: ChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -46,6 +72,11 @@ export function Chat({ backend }: ChatProps) {
   const [failedQuestion, setFailedQuestion] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const voice = useVoiceInput((text) =>
+    setDraft((current) => appendTranscript(current, text)),
+  );
+  const showVoiceInput = voiceInput && isVoiceInputSupported();
+  const isListening = voice.status !== "idle";
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -99,7 +130,7 @@ export function Chat({ backend }: ChatProps) {
 
   function submit() {
     const content = draft.trim();
-    if (!content || isSending) return;
+    if (!content || isSending || isListening) return;
     setDraft("");
     void send(content);
   }
@@ -232,17 +263,63 @@ export function Chat({ backend }: ChatProps) {
           className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500"
         />
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-          <span className="px-2 text-xs text-slate-600 dark:text-slate-400">
-            Answers use live NHTSA and CPSC recall data
-          </span>
-          <Button
-            type="submit"
-            size="icon"
-            disabled={isSending || !draft.trim()}
-            aria-label="Send question"
+          <span
+            className={`px-2 text-xs ${
+              voice.error && !isListening
+                ? "text-rose-700 dark:text-rose-300"
+                : "text-slate-600 dark:text-slate-400"
+            }`}
+            aria-live="polite"
           >
-            <ArrowUp className="size-4" aria-hidden="true" />
-          </Button>
+            {voice.status === "recording"
+              ? "Listening… your words appear after each pause"
+              : voice.status === "finishing"
+                ? "Finishing transcription…"
+                : voice.error
+                  ? VOICE_INPUT_ERRORS[voice.error]
+                  : "Answers use live NHTSA and CPSC recall data"}
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {showVoiceInput && (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                onClick={
+                  voice.status === "recording" ? voice.stop : voice.start
+                }
+                disabled={voice.status === "finishing"}
+                aria-pressed={voice.status === "recording"}
+                aria-label={
+                  voice.status === "recording"
+                    ? "Stop voice input"
+                    : "Start voice input"
+                }
+              >
+                {voice.status === "recording" ? (
+                  <Square
+                    className="size-4 animate-pulse fill-rose-600 text-rose-600"
+                    aria-hidden="true"
+                  />
+                ) : voice.status === "finishing" ? (
+                  <LoaderCircle
+                    className="size-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Mic className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+            )}
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isSending || isListening || !draft.trim()}
+              aria-label="Send question"
+            >
+              <ArrowUp className="size-4" aria-hidden="true" />
+            </Button>
+          </div>
         </div>
       </form>
     </section>

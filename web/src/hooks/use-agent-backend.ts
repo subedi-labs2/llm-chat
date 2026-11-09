@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { getChatConfig, type AgentBackend } from "@/lib/api";
+import type { AgentBackend, ChatConfig } from "@/lib/api";
 
 const STORAGE_KEY = "agent-backend";
-const CONFIG_RETRY_MS = 3_000;
 
 function isAgentBackend(value: unknown): value is AgentBackend {
   return value === "pydantic_ai" || value === "langchain";
@@ -24,38 +23,13 @@ export interface AgentBackendSelection {
   setBackend: (backend: AgentBackend) => void;
 }
 
-export function useAgentBackend(apiConnected: boolean): AgentBackendSelection {
-  const [loaded, setLoaded] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [backend, setBackendState] = useState<AgentBackend | null>(null);
-
-  useEffect(() => {
-    if (!apiConnected || loaded) return;
-    const controller = new AbortController();
-    let retryId: number | undefined;
-    getChatConfig(controller.signal)
-      .then((config) => {
-        setLoaded(true);
-        if (config.backend_selection) {
-          setBackendState(storedBackend() ?? config.default_backend);
-        }
-      })
-      .catch(() => {
-        // Until the config loads, the API's default backend is used.
-        if (controller.signal.aborted) return;
-        retryId = window.setTimeout(
-          () => setAttempt((n) => n + 1),
-          CONFIG_RETRY_MS,
-        );
-      });
-    return () => {
-      controller.abort();
-      window.clearTimeout(retryId);
-    };
-  }, [apiConnected, loaded, attempt]);
+export function useAgentBackend(
+  config: ChatConfig | null,
+): AgentBackendSelection {
+  const [chosen, setChosen] = useState<AgentBackend | null>(storedBackend);
 
   function setBackend(next: AgentBackend) {
-    setBackendState(next);
+    setChosen(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
@@ -63,5 +37,8 @@ export function useAgentBackend(apiConnected: boolean): AgentBackendSelection {
     }
   }
 
+  const backend = config?.backend_selection
+    ? (chosen ?? config.default_backend)
+    : null;
   return { backend, setBackend };
 }

@@ -18,6 +18,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       charts: ${{ steps.filter.outputs.charts }}
+      stt: ${{ steps.filter.outputs.stt }}
     steps:
       - uses: actions/checkout@v6
 
@@ -34,6 +35,9 @@ jobs:
               - '.github/workflows/ci.yml'
             charts:
               - 'charts/**'
+              - '.github/workflows/ci.yml'
+            stt:
+              - 'charts/stt/**'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -186,3 +190,49 @@ jobs:
           kubectl -n llm-chat describe pods
           kubectl -n llm-chat logs deployment/web --all-containers || true
           kubectl -n llm-chat logs deployment/api --all-containers || true
+
+  stt-install:
+    name: STT Chart Install Test
+    needs: [changes, charts]
+    if: needs.changes.outputs.stt == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Install stt chart
+        run: |
+          kubectl create namespace llm-chat
+          # Pulls a ~3.4 GB image and downloads the model, so allow plenty of time.
+          helm install stt charts/stt -n llm-chat --wait --timeout 15m
+
+      - name: Transcribe a spoken sentence
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
+          espeak-ng -w speech.wav "Is there a recall on the Honda Accord?"
+          kubectl -n llm-chat port-forward svc/stt 8000:8000 &
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 2
+          done
+          model=$(helm get values stt -n llm-chat --all -o json | jq -r .model)
+          text=$(curl -fsS http://localhost:8000/v1/audio/transcriptions \
+            -F file=@speech.wav -F model="$model" -F language=en -F response_format=text)
+          echo "Transcript: $text"
+          echo "$text" | grep -qiE 'honda|accord|recall'
+
+      - name: Show diagnostics
+        if: failure()
+        run: |
+          kubectl -n llm-chat get all
+          kubectl -n llm-chat get events --sort-by=.lastTimestamp
+          kubectl -n llm-chat describe pods
+          kubectl -n llm-chat logs deployment/stt --all-containers || true
