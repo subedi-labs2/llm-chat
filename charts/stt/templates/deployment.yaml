@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "llm-chat-stt.fullname" . }}
+  labels:
+    {{- include "llm-chat-stt.labels" . | nindent 4 }}
+spec:
+  # One replica: models load into memory per pod, and the model volume is ReadWriteOnce.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "llm-chat-stt.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "llm-chat-stt.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # Downloads the model once; later starts reuse the cached copy, even offline.
+        - name: download-model
+          image: {{ include "llm-chat-stt.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - python
+            - -c
+            - |
+              import os
+              from huggingface_hub import snapshot_download
+
+              # The files speaches loads for a faster-whisper model.
+              files = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*", "README.md"]
+              print("Model ready at", snapshot_download(os.environ["MODEL"], allow_patterns=files))
+          env:
+            - name: MODEL
+              value: {{ .Values.model | quote }}
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /home/ubuntu/.cache/huggingface
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: stt
+          image: {{ include "llm-chat-stt.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            # Transcribe through the server's own HTTP endpoint. speaches 0.9.0-rc.3's in-process
+            # client fails realtime transcription (speaches-ai/speaches#559).
+            - name: LOOPBACK_HOST_URL
+              value: http://127.0.0.1:8000
+            - name: ENABLE_UI
+              value: "false"
+            - name: LOG_LEVEL
+              value: info
+            # Keep the model loaded so the first phrase after a quiet period isn't slow.
+            - name: STT_MODEL_TTL
+              value: "-1"
+            - name: WHISPER__INFERENCE_DEVICE
+              value: cpu
+            - name: WHISPER__COMPUTE_TYPE
+              value: {{ .Values.whisper.computeType | quote }}
+            - name: WHISPER__CPU_THREADS
+              value: {{ .Values.whisper.cpuThreads | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /home/ubuntu/.cache/huggingface
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: models
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "llm-chat-stt.claimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

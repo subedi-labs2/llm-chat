@@ -100,6 +100,7 @@ async def chat_config(settings: Annotated[Settings, Depends(get_settings)]) -> C
     return ChatConfig(
         default_backend=settings.agent_backend,
         backend_selection=settings.allow_backend_selection,
+        voice_input=bool(settings.stt_url),
     )
 
 

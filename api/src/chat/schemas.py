@@ -40,3 +40,5 @@ class ChatResponse(BaseModel):
 class ChatConfig(BaseModel):
     default_backend: AgentBackend
     backend_selection: bool
+    # Whether /api/transcribe is configured, so the web app shows the microphone button.
+    voice_input: bool

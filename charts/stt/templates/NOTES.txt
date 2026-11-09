@@ -1,0 +1,9 @@
+Speech-to-text Service: http://{{ include "llm-chat-stt.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+The first start downloads {{ .Values.model }} before the server becomes ready.
+Enable voice input in the API chart with:
+  extraEnv:
+    - name: STT_URL
+      value: http://{{ include "llm-chat-stt.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+    - name: STT_MODEL
+      value: {{ .Values.model }}

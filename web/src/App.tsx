@@ -6,12 +6,14 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { VersionInfo } from "@/components/version-info";
 import { useAgentBackend } from "@/hooks/use-agent-backend";
 import { useApiStatus } from "@/hooks/use-api-status";
+import { useChatConfig } from "@/hooks/use-chat-config";
 import { useTheme } from "@/hooks/use-theme";
 import { THEME_TOGGLE_ENABLED } from "@/lib/config";
 
 function App() {
   const { status: apiStatus, health } = useApiStatus();
-  const { backend, setBackend } = useAgentBackend(apiStatus === "connected");
+  const chatConfig = useChatConfig(apiStatus === "connected");
+  const { backend, setBackend } = useAgentBackend(chatConfig);
   const { theme, setTheme } = useTheme();
 
   return (
@@ -68,7 +70,7 @@ function App() {
           </p>
         </section>
 
-        <Chat backend={backend} />
+        <Chat backend={backend} voiceInput={chatConfig?.voice_input === true} />
 
         <p className="mt-6 text-center text-xs leading-5 text-slate-600 dark:text-slate-400">
           Always confirm critical recall information with the manufacturer or

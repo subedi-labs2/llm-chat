@@ -1,0 +1,7 @@
+# Speech-to-text for voice input. The API's STT_MODEL (api-values.yaml) must match.
+model: Systran/faster-distil-whisper-small.en
+
+# k3d's default local-path StorageClass keeps the downloaded model across restarts.
+persistence:
+  enabled: true
+  size: 2Gi

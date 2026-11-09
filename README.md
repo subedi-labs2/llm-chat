@@ -1,6 +1,6 @@
 # Consumer Product & Vehicle Safety Assistant
 
-A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with a Google Gemini model (via [Pydantic AI](https://ai.pydantic.dev/) by default, or [LangChain](https://docs.langchain.com/oss/python/langchain/overview) with `AGENT_BACKEND=langchain`) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface.
+A public-facing assistant that helps people research product and vehicle safety. A FastAPI service answers recall questions with a Google Gemini model (via [Pydantic AI](https://ai.pydantic.dev/) by default, or [LangChain](https://docs.langchain.com/oss/python/langchain/overview) with `AGENT_BACKEND=langchain`) that calls live NHTSA and CPSC recall APIs as tools, and a React app provides the chat interface. Optional voice input transcribes speech with a self-hosted [speaches](https://speaches.ai) (faster-whisper) server, so audio never leaves your infrastructure.
 
 ## How answers stay grounded
 
@@ -11,9 +11,9 @@ A public-facing assistant that helps people research product and vehicle safety.
 
 ## Structure
 
-- `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agents and `/api/chat` endpoint)
+- `api/` — FastAPI service managed with uv (`src/recalls` data clients, `src/chat` agents and `/api/chat` endpoint, `src/transcribe` voice input relay)
 - `web/` — React, TypeScript, Vite, Tailwind CSS, and shadcn/ui
-- `charts/` — Helm charts for the API and web, released independently
+- `charts/` — Helm charts for the API, web, and speech-to-text (stt), released independently
 - `infra/` — local k3d cluster config, per-environment chart values, and the Cloudflare Tunnel connector
 - `.github/workflows/` — pull request and `main` branch checks, image and chart releases
 
@@ -35,6 +35,8 @@ docker compose up --build
 ```
 
 Open <http://localhost:5173>; the API is also available at <http://localhost:8000>. Source folders are mounted into the containers, so code changes reload automatically. To enable chat, set `GEMINI_API_KEY` in `api/.env` (copy `api/.env.example`) and run `docker compose restart api`. After changing dependencies, rebuild with `docker compose up --build --renew-anon-volumes`. Stop everything with `docker compose down`.
+
+To try voice input, set `STT_URL=http://stt:8000` in `api/.env` and run `docker compose --profile voice up --build`. The first start downloads the speech model (about 350 MB).
 
 ### Without Docker
 
@@ -80,12 +82,19 @@ Every push to `main` publishes production images to GitHub Container Registry fo
 
 Each image is tagged `latest` and `sha-<full commit SHA>`; released images are also tagged with their version (`X.Y.Z` and `X.Y`). Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
 
+## Voice input
+
+When `STT_URL` is set, the web app shows a microphone button next to **Send**. The browser streams 16-bit, 24 kHz mono audio over a WebSocket to `/api/transcribe`; the API relays it to speaches' realtime endpoint and sends back text, which is added to the message box for review before sending. Text arrives after each pause in speech rather than word by word. Speech-to-text runs on CPU (English model `Systran/faster-distil-whisper-small.en` by default) and allows `STT_MAX_SESSIONS` concurrent sessions of up to `STT_MAX_SESSION_SECONDS` each per API replica. Each session may send at most that much audio, no faster than real time (plus a 2-second burst).
+
+Browsers allow microphone access only on HTTPS or `localhost`. The app has no login, so put a public deployment behind Cloudflare Access (see below) to keep others from using your CPU and Gemini quota.
+
 ## Kubernetes (Helm)
 
-The API and web have separate Helm charts, published to GHCR as OCI artifacts:
+The API, web, and speech-to-text have separate Helm charts, published to GHCR as OCI artifacts:
 
 - `oci://ghcr.io/subedi-labs2/charts/llm-chat-api` — Service named after the release (install as `api`).
 - `oci://ghcr.io/subedi-labs2/charts/llm-chat-web` — proxies `/api` to `http://api.<release namespace>.svc.cluster.local:8000` by default; override with `apiUpstream`. Set `themeToggle: false` to hide the light/dark mode toggle in the header (default `true`).
+- `oci://ghcr.io/subedi-labs2/charts/llm-chat-stt` — optional [speaches](https://speaches.ai) server for voice input (install as `stt`, then set the API's `STT_URL` to `http://stt:8000`). An init container downloads `model` from Hugging Face into a PersistentVolumeClaim on first start, after which the server runs offline. Its image is about 3.4 GB.
 
 Install the API and web in either order. Web returns 502 for `/api` until the API is ready.
 
@@ -104,9 +113,12 @@ helm upgrade --install api oci://ghcr.io/subedi-labs2/charts/llm-chat-api \
   -n llm-chat -f infra/environments/wsl/api-values.yaml --wait
 helm upgrade --install web oci://ghcr.io/subedi-labs2/charts/llm-chat-web \
   -n llm-chat -f infra/environments/wsl/web-values.yaml --wait
+# Voice input; the first install pulls a large image and downloads the model.
+helm upgrade --install stt oci://ghcr.io/subedi-labs2/charts/llm-chat-stt \
+  -n llm-chat -f infra/environments/wsl/stt-values.yaml --wait --timeout 15m
 ```
 
-Open http://localhost:8080. The Secret holds only `GEMINI_API_KEY`; other API settings (model, fallbacks, backend) are set through `extraEnv` in `infra/environments/wsl/api-values.yaml`. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api` or `charts/web` instead of the `oci://` reference.
+Open http://localhost:8080. The Secret holds only `GEMINI_API_KEY`; other API settings (model, fallbacks, backend, speech-to-text) are set through `extraEnv` in `infra/environments/wsl/api-values.yaml`. Add `--version <x.y.z>` to pin a chart version. To test unpublished changes, use `charts/api`, `charts/web`, or `charts/stt` instead of the `oci://` reference. Skip the stt release and remove `STT_URL` from `api-values.yaml` to run without voice input.
 
 ### Public access (Cloudflare Tunnel)
 
@@ -127,7 +139,12 @@ Expose the local cluster on a public domain (for example `llmchat.pukarsubedi.co
    - **Service:** `HTTP` → `traefik.kube-system.svc.cluster.local:80`
 4. Open https://llmchat.pukarsubedi.com.
 
-The site is only up while the machine and cluster are running. The app has no login, so consider protecting the hostname with **Zero Trust → Access → Applications** to keep others from using your Gemini quota.
+The site is only up while the machine and cluster are running. The app has no login, so protect the hostname with Cloudflare Access to keep others from using your Gemini quota and speech-to-text CPU:
+
+1. In **Zero Trust → Access → Applications**, choose **Add an application → Self-hosted**, and enter the public hostname from step 3.
+2. Add an **Allow** policy that includes your email address (Cloudflare emails a one-time PIN at sign-in).
+
+Access protects every path, including the `/api/transcribe` WebSocket, without changes to the app.
 
 Troubleshooting: `kubectl -n llm-chat logs -l app=cloudflared`. `Provided Tunnel token is not valid` means the secret holds more than the `eyJ…` token; recreate it with `kubectl -n llm-chat delete secret cloudflared` and repeat step 2.
 
@@ -137,7 +154,7 @@ The API and web are versioned independently with [release-please](https://github
 
 1. On each push to `main`, the **Release** workflow opens or updates a release PR that bumps the versions in `api/pyproject.toml` (and `uv.lock`) and `web/package.json`, and updates each `CHANGELOG.md`. Changed components also get a `sha-<commit>` image for testing; these are not deployed.
 2. Merging the release PR tags each released component (`api-vX.Y.Z`, `web-vX.Y.Z`) and creates a GitHub Release. Each tag push runs **Release** again, which builds the tagged commit, publishes an image tagged `X.Y.Z`, and opens a PR that pins that image's digest in the chart and bumps the chart's patch version. If publishing fails, re-run that workflow run, or run **Release** manually and pick the tag.
-3. CI lints and validates the charts, requires a version bump for any chart change, and installs both charts into a kind cluster.
+3. CI lints and validates the charts, requires a version bump for any chart change, and installs the API and web charts into a kind cluster. When `charts/stt` changes, CI also installs it and transcribes a spoken sentence.
 4. Merging a chart change runs **Release Charts**, which publishes any chart version not already in GHCR.
 
 To see what is deployed, check the footer of the web app (hover for commits), `GET /api/health` (`version` and `commit`), or `helm list -n llm-chat` (the app version column). Builds that aren't releases report the last release plus the commit, such as `0.2.0+sha.abc1234`.

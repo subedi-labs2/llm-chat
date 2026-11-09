@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     recall_api_timeout_seconds: float = 15.0
     max_product_recall_results: int = 10
 
+    # Voice input: base URL of a speaches server (e.g. http://stt:8000). Unset disables it.
+    stt_url: str | None = None
+    stt_model: str = "Systran/faster-distil-whisper-small.en"
+    # Spoken language hint; None lets the model detect it.
+    stt_language: str | None = "en"
+    # Concurrent voice sessions per API replica; each one keeps a CPU core busy on the STT server.
+    stt_max_sessions: int = 2
+    stt_max_session_seconds: float = 120.0
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

@@ -1273,6 +1273,7 @@ dependencies = [
     { name = "pydantic-ai-slim", extra = ["google"] },
     { name = "pydantic-settings" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1290,6 +1291,7 @@ requires-dist = [
     { name = "pydantic-ai-slim", extras = ["google"], specifier = ">=2.64.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.11.0,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0,<0.39" },
+    { name = "websockets", specifier = ">=17.4,<18" },
 ]
 
 [package.metadata.requires-dev]
