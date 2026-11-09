@@ -16,6 +16,9 @@ imagePullSecrets: []
 # resolver ignores DNS search domains. Templated, so the default follows the release namespace.
 apiUpstream: "http://api.{{ .Release.Namespace }}.svc.cluster.local:8000"
 
+# Show the light/dark mode toggle in the header. When off, the app stays in light mode.
+themeToggle: true
+
 service:
   type: ClusterIP
   port: 80

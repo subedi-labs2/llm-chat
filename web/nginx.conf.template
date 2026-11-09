@@ -16,6 +16,13 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # Runtime settings read by index.html before the app starts.
+    location = /config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-cache";
+        return 200 "window.APP_CONFIG = { themeToggle: ${THEME_TOGGLE} };\n";
+    }
+
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;

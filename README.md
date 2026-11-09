@@ -76,7 +76,7 @@ Use `uv run ruff format .` and `npm run format` to format code. GitHub Actions r
 Every push to `main` publishes production images to GitHub Container Registry for whichever of `api/` or `web/` changed (run the **Release** workflow manually to publish both):
 
 - `ghcr.io/subedi-labs2/llm-chat-api` — FastAPI on port 8000; configure it with the same environment variables as `api/.env.example`.
-- `ghcr.io/subedi-labs2/llm-chat-web` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`). The API address is looked up per request, so web starts before the API exists. In Kubernetes, set `API_UPSTREAM` to the Service's fully qualified name, such as `http://api.<namespace>.svc.cluster.local:8000`.
+- `ghcr.io/subedi-labs2/llm-chat-web` — the built web app served by nginx on port 8080, which proxies `/api` to `API_UPSTREAM` (default `http://backend:8000`). The API address is looked up per request, so web starts before the API exists. `THEME_TOGGLE` (default `true`) shows the light/dark mode toggle in the header; when `false`, the app stays in light mode. In Kubernetes, set `API_UPSTREAM` to the Service's fully qualified name, such as `http://api.<namespace>.svc.cluster.local:8000`.
 
 Each image is tagged `latest` and `sha-<full commit SHA>`; released images are also tagged with their version (`X.Y.Z` and `X.Y`). Both Dockerfiles are multistage: Compose uses the `dev` stage, and releases use `prod`. To build a production image locally, run `docker build --target prod api` or `docker build --target prod web`.
 
@@ -85,7 +85,7 @@ Each image is tagged `latest` and `sha-<full commit SHA>`; released images are a
 The API and web have separate Helm charts, published to GHCR as OCI artifacts:
 
 - `oci://ghcr.io/subedi-labs2/charts/llm-chat-api` — Service named after the release (install as `api`).
-- `oci://ghcr.io/subedi-labs2/charts/llm-chat-web` — proxies `/api` to `http://api.<release namespace>.svc.cluster.local:8000` by default; override with `apiUpstream`.
+- `oci://ghcr.io/subedi-labs2/charts/llm-chat-web` — proxies `/api` to `http://api.<release namespace>.svc.cluster.local:8000` by default; override with `apiUpstream`. Set `themeToggle: false` to hide the light/dark mode toggle in the header (default `true`).
 
 Install the API and web in either order. Web returns 502 for `/api` until the API is ready.
 

@@ -139,7 +139,7 @@ export function Chat({ backend }: ChatProps) {
               className={
                 turn.role === "user"
                   ? "ml-auto max-w-[85%] rounded-2xl bg-teal-700 px-4 py-3 text-sm whitespace-pre-wrap text-white"
-                  : "mr-auto max-w-[95%] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 whitespace-pre-wrap text-slate-800 shadow-sm"
+                  : "mr-auto max-w-[95%] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 whitespace-pre-wrap text-slate-800 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
               }
             >
               <span className="sr-only">
@@ -147,8 +147,8 @@ export function Chat({ backend }: ChatProps) {
               </span>
               {turn.content}
               {turn.sources && turn.sources.length > 0 && (
-                <div className="mt-3 border-t border-slate-100 pt-3 whitespace-normal">
-                  <p className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                <div className="mt-3 border-t border-slate-100 pt-3 whitespace-normal dark:border-slate-800">
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
                     Sources
                   </p>
                   <ul className="flex flex-col gap-1.5">
@@ -158,7 +158,7 @@ export function Chat({ backend }: ChatProps) {
                           href={source.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-start gap-1.5 text-xs text-teal-800 underline-offset-2 hover:underline"
+                          className="inline-flex items-start gap-1.5 text-xs text-teal-800 underline-offset-2 hover:underline dark:text-teal-300"
                         >
                           <ExternalLink
                             className="mt-0.5 size-3 shrink-0"
@@ -174,14 +174,14 @@ export function Chat({ backend }: ChatProps) {
                 </div>
               )}
               {backend !== null && turn.backend && (
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                   Answered with {AGENT_BACKEND_LABELS[turn.backend]}
                 </p>
               )}
             </li>
           ))}
           {isSending && (
-            <li className="mr-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+            <li className="mr-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
               <LoaderCircle
                 className="size-4 animate-spin"
                 aria-hidden="true"
@@ -196,7 +196,7 @@ export function Chat({ backend }: ChatProps) {
       {error && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+          className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200"
         >
           <p>{error}</p>
           {failedQuestion !== null && (
@@ -216,7 +216,7 @@ export function Chat({ backend }: ChatProps) {
 
       <form
         onSubmit={onSubmit}
-        className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
+        className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 dark:border-slate-800 dark:bg-slate-900"
       >
         <label htmlFor="safety-question" className="sr-only">
           Ask a product safety question
@@ -229,10 +229,10 @@ export function Chat({ backend }: ChatProps) {
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Ask about a product or vehicle recall, e.g. “Any recalls on a 2018 Honda Accord?”"
-          className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+          className="w-full resize-none bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500"
         />
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-          <span className="px-2 text-xs text-slate-600">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <span className="px-2 text-xs text-slate-600 dark:text-slate-400">
             Answers use live NHTSA and CPSC recall data
           </span>
           <Button

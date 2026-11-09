@@ -10,3 +10,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  /** Runtime settings loaded from /config.js before the app starts. */
+  APP_CONFIG?: {
+    themeToggle?: boolean;
+  };
+}
