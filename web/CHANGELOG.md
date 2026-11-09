@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.5.0...web-v0.6.0) (2026-11-09)
+
+
+### Features
+
+* **web:** fly the landing robot head into the site header ([#33](https://github.com/subedi-labs2/llm-chat/issues/33)) ([0c16015](https://github.com/subedi-labs2/llm-chat/commit/0c1601593afd344b6775e2da7bf4b0adbb3df2b0))
+
 ## [0.5.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.4.0...web-v0.5.0) (2026-11-09)
 
 
