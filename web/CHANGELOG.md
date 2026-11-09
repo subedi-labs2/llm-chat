@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.4.0...web-v0.5.0) (2026-11-09)
+
+
+### Features
+
+* **web:** add interactive 3D landing page with mouse-following robot head ([#30](https://github.com/subedi-labs2/llm-chat/issues/30)) ([7916ef2](https://github.com/subedi-labs2/llm-chat/commit/7916ef28288901b7bdf85ae169697e3966e2eb52))
+
 ## [0.4.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.3.0...web-v0.4.0) (2026-11-09)
 
 
