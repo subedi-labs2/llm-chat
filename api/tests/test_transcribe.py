@@ -12,7 +12,7 @@ from websockets.sync.server import ServerConnection, serve
 
 from src.core.config import Settings, get_settings
 from src.main import app
-from src.transcribe.router import FLUSH_SILENCE, CloseCode
+from src.transcribe.router import AUDIO_BURST_SECONDS, FLUSH_SILENCE, MAX_CHUNK_BYTES, CloseCode
 
 SPEECH = b"\x10\x00" * 2400
 
@@ -130,6 +130,32 @@ def test_transcribe_rejects_invalid_audio(speaches: FakeSpeaches) -> None:
         assert ws.receive_json() == {"type": "ready"}
         ws.send_bytes(b"\x01\x02\x03")
         assert close_code(ws) == CloseCode.INVALID_AUDIO
+
+
+def test_transcribe_rejects_audio_faster_than_real_time(speaches: FakeSpeaches) -> None:
+    use_settings(stt_url=speaches.url)
+    burst_chunks = int(AUDIO_BURST_SECONDS)
+
+    with TestClient(app).websocket_connect("/api/transcribe") as ws:
+        assert ws.receive_json() == {"type": "ready"}
+        for _ in range(burst_chunks + 1):
+            ws.send_bytes(bytes(MAX_CHUNK_BYTES))
+        assert close_code(ws) == CloseCode.INVALID_AUDIO
+
+    # The startup burst is forwarded; the chunk beyond it is not.
+    assert len(speaches.audio) == burst_chunks
+
+
+def test_transcribe_enforces_session_audio_budget(speaches: FakeSpeaches) -> None:
+    use_settings(stt_url=speaches.url, stt_max_session_seconds=1.5)
+
+    with TestClient(app).websocket_connect("/api/transcribe") as ws:
+        assert ws.receive_json() == {"type": "ready"}
+        ws.send_bytes(bytes(MAX_CHUNK_BYTES))
+        ws.send_bytes(bytes(MAX_CHUNK_BYTES))
+        assert close_code(ws) == CloseCode.TIME_LIMIT
+
+    assert len(speaches.audio) == 1
 
 
 def test_transcribe_reports_server_errors(speaches: FakeSpeaches) -> None:

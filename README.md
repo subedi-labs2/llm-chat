@@ -84,7 +84,7 @@ Each image is tagged `latest` and `sha-<full commit SHA>`; released images are a
 
 ## Voice input
 
-When `STT_URL` is set, the web app shows a microphone button next to **Send**. The browser streams 16-bit, 24 kHz mono audio over a WebSocket to `/api/transcribe`; the API relays it to speaches' realtime endpoint and sends back text, which is added to the message box for review before sending. Text arrives after each pause in speech rather than word by word. Speech-to-text runs on CPU (English model `Systran/faster-distil-whisper-small.en` by default) and allows `STT_MAX_SESSIONS` concurrent sessions of up to `STT_MAX_SESSION_SECONDS` each per API replica.
+When `STT_URL` is set, the web app shows a microphone button next to **Send**. The browser streams 16-bit, 24 kHz mono audio over a WebSocket to `/api/transcribe`; the API relays it to speaches' realtime endpoint and sends back text, which is added to the message box for review before sending. Text arrives after each pause in speech rather than word by word. Speech-to-text runs on CPU (English model `Systran/faster-distil-whisper-small.en` by default) and allows `STT_MAX_SESSIONS` concurrent sessions of up to `STT_MAX_SESSION_SECONDS` each per API replica. Each session may send at most that much audio, no faster than real time (plus a 2-second burst).
 
 Browsers allow microphone access only on HTTPS or `localhost`. The app has no login, so put a public deployment behind Cloudflare Access (see below) to keep others from using your CPU and Gemini quota.
 

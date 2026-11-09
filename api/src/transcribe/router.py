@@ -33,6 +33,8 @@ router = APIRouter(tags=["transcribe"])
 SAMPLE_RATE = 24_000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
 MAX_CHUNK_BYTES = BYTES_PER_SECOND
+# Audio may arrive at most this far ahead of real time, to absorb network jitter.
+AUDIO_BURST_SECONDS = 2.0
 # speaches ends a phrase only once its latest 3 s of audio are silent, so stopping sends 3.5 s.
 FLUSH_SILENCE = bytes(BYTES_PER_SECOND * 7 // 2)
 # After a stop, how long to wait for speaches to react to the silence before finishing.
@@ -58,7 +60,11 @@ class ClientGone(Exception):
 
 
 class InvalidAudio(Exception):
-    """The browser sent audio in an unexpected format."""
+    """The browser sent audio in an unexpected format or faster than real time."""
+
+
+class AudioLimit(Exception):
+    """The browser sent more audio than one session allows."""
 
 
 @dataclass
@@ -99,14 +105,28 @@ def is_stop(text: str) -> bool:
     return isinstance(message, dict) and message.get("type") == "stop"
 
 
-async def forward_audio(ws: WebSocket, upstream: ClientConnection, state: SessionState) -> None:
-    """Streams browser audio to speaches until the browser asks to stop."""
+async def forward_audio(
+    ws: WebSocket, upstream: ClientConnection, state: SessionState, max_seconds: float
+) -> None:
+    """Streams browser audio to speaches until the browser asks to stop.
+
+    Bounds the upstream workload by audio duration: at most ``max_seconds`` of audio per
+    session, arriving no faster than real time plus ``AUDIO_BURST_SECONDS``.
+    """
+    started = time.monotonic()
+    received = 0
     while True:
         message = await ws.receive()
         if message["type"] == "websocket.disconnect":
             raise ClientGone
         if (audio := message.get("bytes")) is not None:
             if not audio or len(audio) > MAX_CHUNK_BYTES or len(audio) % 2:
+                raise InvalidAudio
+            received += len(audio)
+            if received > max_seconds * BYTES_PER_SECOND:
+                raise AudioLimit
+            allowed = (time.monotonic() - started + AUDIO_BURST_SECONDS) * BYTES_PER_SECOND
+            if received > allowed:
                 raise InvalidAudio
             await upstream.send(append_event(audio))
         elif is_stop(message.get("text") or ""):
@@ -149,7 +169,9 @@ async def relay(ws: WebSocket, settings: Settings) -> None:
         await ws.send_json({"type": "ready"})
 
         state = SessionState()
-        audio = asyncio.create_task(forward_audio(ws, upstream, state))
+        audio = asyncio.create_task(
+            forward_audio(ws, upstream, state, settings.stt_max_session_seconds)
+        )
         events = asyncio.create_task(forward_events(ws, upstream, state))
         try:
             await asyncio.wait({audio, events}, return_when=asyncio.FIRST_COMPLETED)
@@ -194,6 +216,8 @@ async def transcribe(ws: WebSocket, settings: Annotated[Settings, Depends(get_se
         pass
     except InvalidAudio:
         await close(ws, CloseCode.INVALID_AUDIO, "Invalid audio")
+    except AudioLimit:
+        await close(ws, CloseCode.TIME_LIMIT, "Voice input time limit reached")
     except TimeoutError:
         if limit.expired():
             await close(ws, CloseCode.TIME_LIMIT, "Voice input time limit reached")

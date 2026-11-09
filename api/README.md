@@ -7,7 +7,7 @@ FastAPI service for the Consumer Product & Vehicle Safety Assistant.
 - `GET /api/health` — health check.
 - `GET /api/chat/config` — returns `{"default_backend": "pydantic_ai" | "langchain", "backend_selection": bool, "voice_input": bool}` so the web app knows whether to show the agent framework toggle and the microphone button.
 - `POST /api/chat` — answers recall questions. Body: `{"messages": [{"role": "user", "content": "..."}], "backend": "langchain"}` (up to 20 messages, last must be from the user; `backend` is optional and only honored when `ALLOW_BACKEND_SELECTION` is on). Returns `{"answer": "...", "sources": [{"id", "agency", "title", "url"}], "backend": "..."}`, where `backend` is the agent that answered. Returns 503 when `GEMINI_API_KEY` is unset and 502 when the model call fails.
-- `WS /api/transcribe` — voice input, relayed to a [speaches](https://speaches.ai) realtime endpoint at `STT_URL`. The client sends binary frames of 16-bit little-endian, 24 kHz mono PCM (at most 48,000 bytes each), then `{"type": "stop"}` when the user stops. The server sends `{"type": "ready"}`, `{"type": "speech_started"}`, and `{"type": "transcript", "text": "..."}` once per phrase, and closes with code 1000 after the last transcript. Error close codes: 4400 invalid audio, 4408 session time limit, 4429 too many sessions, 4502 speech-to-text failed or unreachable, 4503 not configured.
+- `WS /api/transcribe` — voice input, relayed to a [speaches](https://speaches.ai) realtime endpoint at `STT_URL`. The client sends binary frames of 16-bit little-endian, 24 kHz mono PCM (at most 48,000 bytes each), then `{"type": "stop"}` when the user stops. The server sends `{"type": "ready"}`, `{"type": "speech_started"}`, and `{"type": "transcript", "text": "..."}` once per phrase, and closes with code 1000 after the last transcript. Audio may arrive at most 2 seconds ahead of real time, and a session may send at most `STT_MAX_SESSION_SECONDS` of audio. Error close codes: 4400 invalid audio or audio sent faster than real time, 4408 session time or audio limit, 4429 too many sessions, 4502 speech-to-text failed or unreachable, 4503 not configured.
 
 ## Configuration
 
@@ -26,7 +26,7 @@ FastAPI service for the Consumer Product & Vehicle Safety Assistant.
 | `STT_MODEL`                                       | `Systran/faster-distil-whisper-small.en`        | Transcription model; must be downloaded on the speaches server                           |
 | `STT_LANGUAGE`                                    | `en`                                            | Spoken language passed to the model                                                      |
 | `STT_MAX_SESSIONS`                                | `2`                                             | Concurrent voice sessions per API process; more are rejected with 4429                   |
-| `STT_MAX_SESSION_SECONDS`                         | `120`                                           | Longest voice session before it is closed with 4408                                      |
+| `STT_MAX_SESSION_SECONDS`                         | `120`                                           | Longest voice session (wall clock and audio) before it is closed with 4408              |
 
 ## Agent backends
 
