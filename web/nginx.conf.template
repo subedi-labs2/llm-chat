@@ -33,7 +33,7 @@ server {
     location = /config.js {
         default_type application/javascript;
         add_header Cache-Control "no-cache";
-        return 200 "window.APP_CONFIG = { themeToggle: ${THEME_TOGGLE} };\n";
+        return 200 "window.APP_CONFIG = { themeToggle: ${THEME_TOGGLE}, idleTimeoutSeconds: ${IDLE_TIMEOUT_SECONDS} };\n";
     }
 
     location /assets/ {

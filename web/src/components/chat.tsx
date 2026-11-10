@@ -40,6 +40,8 @@ interface ChatProps {
   backend: AgentBackend | null;
   /** Show the microphone button (the API has voice input configured). */
   voiceInput: boolean;
+  /** Called when a reply starts/stops streaming or voice input starts/stops. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 const VOICE_INPUT_ERRORS: Record<VoiceInputError, string> = {
@@ -64,7 +66,7 @@ function errorMessage(error: unknown): string {
   return "Something went wrong while researching your question. Please try again.";
 }
 
-export function Chat({ backend, voiceInput }: ChatProps) {
+export function Chat({ backend, voiceInput, onBusyChange }: ChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -79,6 +81,11 @@ export function Chat({ backend, voiceInput }: ChatProps) {
   const isListening = voice.status !== "idle";
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  const busy = isSending || isListening;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
