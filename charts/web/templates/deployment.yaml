@@ -40,6 +40,8 @@ spec:
               value: {{ tpl .Values.apiUpstream . | quote }}
             - name: THEME_TOGGLE
               value: {{ .Values.themeToggle | quote }}
+            - name: IDLE_TIMEOUT_SECONDS
+              value: {{ .Values.idleTimeoutSeconds | quote }}
           readinessProbe:
             httpGet:
               path: /

@@ -15,5 +15,6 @@ interface Window {
   /** Runtime settings loaded from /config.js before the app starts. */
   APP_CONFIG?: {
     themeToggle?: boolean;
+    idleTimeoutSeconds?: number;
   };
 }

@@ -11,8 +11,9 @@ import { VersionInfo } from "@/components/version-info";
 import { useAgentBackend } from "@/hooks/use-agent-backend";
 import { useApiStatus } from "@/hooks/use-api-status";
 import { useChatConfig } from "@/hooks/use-chat-config";
+import { useIdleTimeout } from "@/hooks/use-idle-timeout";
 import { useTheme } from "@/hooks/use-theme";
-import { THEME_TOGGLE_ENABLED } from "@/lib/config";
+import { IDLE_TIMEOUT_MS, THEME_TOGGLE_ENABLED } from "@/lib/config";
 
 const NOD_MS = 550;
 
@@ -27,6 +28,7 @@ function App() {
   const [phase, setPhase] = useState<Phase>("landing");
   const [landingSlot, setLandingSlot] = useState<HTMLDivElement | null>(null);
   const [siteSlot, setSiteSlot] = useState<HTMLDivElement | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
   const entered = phase === "entered";
 
   const startEnter = useCallback(
@@ -41,6 +43,10 @@ function App() {
     const timer = window.setTimeout(skip, reducedMotion ? 0 : NOD_MS);
     return () => window.clearTimeout(timer);
   }, [phase, reducedMotion, skip]);
+
+  // Bring the landing page back after inactivity, keeping the conversation.
+  const returnToLanding = useCallback(() => setPhase("landing"), []);
+  useIdleTimeout(entered && !chatBusy, IDLE_TIMEOUT_MS, returnToLanding);
 
   return (
     <>
@@ -130,6 +136,7 @@ function App() {
           <Chat
             backend={backend}
             voiceInput={chatConfig?.voice_input === true}
+            onBusyChange={setChatBusy}
           />
 
           <p className="mt-6 text-center text-xs leading-5 text-slate-600 dark:text-slate-400">

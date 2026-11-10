@@ -19,6 +19,9 @@ apiUpstream: "http://api.{{ .Release.Namespace }}.svc.cluster.local:8000"
 # Show the light/dark mode toggle in the header. When off, the app stays in light mode.
 themeToggle: true
 
+# Seconds of inactivity before the landing page comes back. 0 disables it.
+idleTimeoutSeconds: 30
+
 service:
   type: ClusterIP
   port: 80

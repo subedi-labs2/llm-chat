@@ -50,6 +50,10 @@
     "themeToggle": {
       "type": "boolean"
     },
+    "idleTimeoutSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
     "service": {
       "type": "object",
       "additionalProperties": false,

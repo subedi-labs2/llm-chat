@@ -1,0 +1,62 @@
+name: Chart Version Bump
+
+# Pushes a patch bump to PRs that change a chart without bumping its version, so the
+# CI "Check chart versions were bumped" step passes. Re-runs on every push to the PR and
+# does nothing once versions are already above the base branch's.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'charts/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chart-version-bump-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump Chart Versions
+    # Fork and Dependabot PRs can't use the release bot secrets or be pushed to.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # A GitHub App token so the pushed commit triggers CI (pushes from GITHUB_TOKEN don't).
+      - name: Create release bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.bot-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Bump changed charts
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: .github/scripts/chart-versions.sh fix
+
+      - name: Push bump
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+          APP_SLUG: ${{ steps.bot-token.outputs.app-slug }}
+        run: |
+          if git diff --quiet -- charts; then
+            echo "Chart versions are already bumped"
+            exit 0
+          fi
+          user_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git commit -q -am "chore(charts): bump chart versions"
+          git push origin "HEAD:$GITHUB_HEAD_REF"
+          {
+            echo "### Bumped chart versions"
+            git show --stat --format= HEAD
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -73,7 +73,10 @@ export function MascotHead({
       siteSlot.appendChild(container);
       flyer.style.display = "none";
     });
-    return () => controls.stop();
+    return () => {
+      controls.stop();
+      flyer.style.display = "none";
+    };
   }, [container, docked, reducedMotion, siteSlot]);
 
   return (
