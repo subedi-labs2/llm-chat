@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.6.0...web-v0.7.0) (2026-11-10)
+
+
+### Features
+
+* **web:** return to the landing page after inactivity ([#36](https://github.com/subedi-labs2/llm-chat/issues/36)) ([a7bb5de](https://github.com/subedi-labs2/llm-chat/commit/a7bb5de2ede1505a6cfdc51f2a475e798c5ded71))
+
 ## [0.6.0](https://github.com/subedi-labs2/llm-chat/compare/web-v0.5.0...web-v0.6.0) (2026-11-09)
 
 
